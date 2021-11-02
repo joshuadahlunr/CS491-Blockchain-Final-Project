@@ -1,0 +1,3 @@
+[submodule "thirdparty/Breep"]
+	path = thirdparty/Breep
+	url = https://github.com/Organic-Code/Breep
