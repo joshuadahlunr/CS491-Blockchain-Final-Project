@@ -19,9 +19,13 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <array>
 #include <boost/uuid/uuid_io.hpp>
 
 #include <breep/network/tcp.hpp>
+
+#include "utility.hpp"
+#include "transaction.hpp"
 
 class timed_message {
 public:
@@ -65,55 +69,58 @@ void connection_disconnection(breep::tcp::peer_manager& /* peer_manager */, cons
 }
 
 int main(int argc, char* argv[]) {
+	//
+	// if (argc != 2 && argc != 4) {
+	// 	std::cout << "Usage: " << argv[0] << " <hosting port> [<target ip> <target port>]" << std::endl;
+	// 	return 1;
+	// }
+	//
+	// // taking the local hosting port as parameter.
+	// breep::tcp::peer_manager peer_manager(static_cast<unsigned short>(atoi(argv[1])));
+	//
+	// // disabling logging.
+	// peer_manager.set_log_level(breep::log_level::none);
+	//
+	// std::cout << "you are " << peer_manager.self().id_as_string() << "." << std::endl;
+	//
+	// // adding listeners. Of course, more listeners could be added.
+	// breep::listener_id da_listener_id = peer_manager.add_data_listener(timed_message());
+	// breep::listener_id co_listener_id = peer_manager.add_connection_listener(&connection_disconnection);
+	// breep::listener_id dc_listener_id = peer_manager.add_disconnection_listener(&connection_disconnection);
+	//
+	//
+	// if (argc == 2) {
+	// 	// only hosting
+	// 	peer_manager.run();
+	// } else {
+	// 	// connecting to a remote peer.                                           v− address in string format (v4 or v6)
+	// 	boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[2]);
+	// 	//                                                    target port -v
+	// 	if (!peer_manager.connect(address, static_cast<unsigned short>(atoi(argv[3])))) {
+	// 		std::cout << "Connection failed" << std::endl;
+	// 		return 1;
+	// 	}
+	// }
+	//
+	//
+	// std::string ans;
+	// while(true) {
+	// 	std::getline(std::cin, ans);
+	//
+	// 	if (ans == "/q") {
+	// 		std::cout << "Leaving..." << std::endl;
+	// 		peer_manager.disconnect();
+	// 		break;
+	// 	} else {
+	// 		peer_manager.send_to_all(ans);
+	// 	}
+	// }
+	//
+	// // this is not obligatory, as the peer_manager is going out of scope anyway
+	// peer_manager.remove_data_listener(da_listener_id);
+	// peer_manager.remove_connection_listener(co_listener_id);
+	// peer_manager.remove_disconnection_listener(dc_listener_id);
 
-	if (argc != 2 && argc != 4) {
-		std::cout << "Usage: " << argv[0] << " <hosting port> [<target ip> <target port>]" << std::endl;
-		return 1;
-	}
-
-	// taking the local hosting port as parameter.
-	breep::tcp::peer_manager peer_manager(static_cast<unsigned short>(atoi(argv[1])));
-
-	// disabling logging.
-	peer_manager.set_log_level(breep::log_level::none);
-
-	std::cout << "you are " << peer_manager.self().id_as_string() << "." << std::endl;
-
-	// adding listeners. Of course, more listeners could be added.
-	breep::listener_id da_listener_id = peer_manager.add_data_listener(timed_message());
-	breep::listener_id co_listener_id = peer_manager.add_connection_listener(&connection_disconnection);
-	breep::listener_id dc_listener_id = peer_manager.add_disconnection_listener(&connection_disconnection);
-
-
-	if (argc == 2) {
-		// only hosting
-		peer_manager.run();
-	} else {
-		// connecting to a remote peer.                                           v− address in string format (v4 or v6)
-		boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[2]);
-		//                                                    target port -v
-		if (!peer_manager.connect(address, static_cast<unsigned short>(atoi(argv[3])))) {
-			std::cout << "Connection failed" << std::endl;
-			return 1;
-		}
-	}
-
-
-	std::string ans;
-	while(true) {
-		std::getline(std::cin, ans);
-
-		if (ans == "/q") {
-			std::cout << "Leaving..." << std::endl;
-			peer_manager.disconnect();
-			break;
-		} else {
-			peer_manager.send_to_all(ans);
-		}
-	}
-
-	// this is not obligatory, as the peer_manager is going out of scope anyway
-	peer_manager.remove_data_listener(da_listener_id);
-	peer_manager.remove_connection_listener(co_listener_id);
-	peer_manager.remove_disconnection_listener(dc_listener_id);
+	Transaction t(std::array<Transaction::Hash, 1>{"bob"}, 27.8);
+	std::cout << t.hash << " - " << t.amount << std::endl;
 }
