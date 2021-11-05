@@ -1,3 +1,6 @@
 [submodule "thirdparty/Breep"]
 	path = thirdparty/Breep
 	url = https://github.com/Organic-Code/Breep
+[submodule "thirdparty/cryptopp"]
+	path = thirdparty/cryptopp
+	url = https://github.com/weidai11/cryptopp.git

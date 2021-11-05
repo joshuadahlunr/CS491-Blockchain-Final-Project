@@ -1,0 +1,3 @@
+-Ithirdparty
+-Ithirdparty/Breep/include
+-std=c++20
