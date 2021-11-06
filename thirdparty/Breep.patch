@@ -1,26 +1,35 @@
+From 736314091ac6ad79d9224beb6537536d8a65280b Mon Sep 17 00:00:00 2001
+From: Joshua Dahl <joshuadahl@nevada.unr.edu>
+Date: Fri, 5 Nov 2021 20:01:00 -0700
+Subject: [PATCH] Fix Endian Checks
+
+---
+ include/breep/network/detail/impl/utils.tcc | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
 diff --git a/include/breep/network/detail/impl/utils.tcc b/include/breep/network/detail/impl/utils.tcc
 index aec30e0..65f09af 100644
 --- a/include/breep/network/detail/impl/utils.tcc
 +++ b/include/breep/network/detail/impl/utils.tcc
 @@ -10,7 +10,8 @@
-
+ 
  #include <cstdint>
  #include <utility>
 -#include <boost/detail/endian.hpp>
 +#include <boost/endian.hpp>
 +#include <boost/predef.h>
-
+ 
  /**
   * @file utils.tcc
 @@ -24,7 +25,7 @@ inline void breep::detail::little_endian(const Container& container, OutputItera
  	static_assert(sizeof(typename Container::value_type) == 1, "Invalid container type.");
  	static_assert(sizeof(typename OutputIterator::container_type::value_type) == 1, "Invalid container type.");
-
+ 
 -#ifdef BOOST_BIG_ENDIAN
 +#if BOOST_ENDIAN_BIG_BYTE
  	#ifndef BREEP_NOWARNING
  		#ifdef _MSC_VER
- 			#pragma message ("This library has not been tested for big endian architectures, and is probably not working on such device. Feedback is very welcome.")
+ 			#pragma message ("This library as not been tested for big endian architectures, and is probably not working on such device. Feedback is very welcome.")
 @@ -49,10 +50,10 @@ inline void breep::detail::little_endian(const Container& container, OutputItera
  			*out++ = data[max + i];
  		}
@@ -35,3 +44,6 @@ index aec30e0..65f09af 100644
 -}
 \ No newline at end of file
 +}
+-- 
+2.33.0
+
