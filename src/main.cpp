@@ -21,120 +21,73 @@
 #include <chrono>
 #include <array>
 #include <boost/uuid/uuid_io.hpp>
-
 #include <breep/network/tcp.hpp>
+#include <breep/util/serialization.hpp>
 
 #include "utility.hpp"
 #include "transaction.hpp"
 #include "tangle.hpp"
-
-class timed_message {
-public:
-	timed_message(): m_starting_time{time(0)} {}
-
-	/*
-	 * Using an operator() overload allows you to pass objects as listeners.
-	 */
-	void operator()(breep::tcp::peer_manager& /* peer_manager */, const breep::tcp::peer& source, breep::cuint8_random_iterator data,
-	                      size_t data_size, bool /* sent_only_to_me */) {
-
-		// print the time and the name of the buddy that sent me something
-		time_t now = time(0) - m_starting_time;
-		std::cout << '[' << std::string(ctime(&now)).substr(14,5) << "] " << source.id_as_string().substr(0, 4) << ": ";
-
-		// prints what he sent.
-		for (; data_size > 0 ; --data_size) {
-			std::cout << static_cast<char>(*data++);
-		}
-		std::cout << std::endl;
-		// we could reply directly here by using the peer_manager passed as parameter.
-		//ie : peer_manager.send_to_all("reply"); or peer_manager.send_to(source, "reply");
-	}
-
-private:
-	const time_t m_starting_time;
-};
-
-/*
- * This method will get called whenever a peer connects // disconnects
- * (connection listeners can be used as disconnection listeners and vice-versa)
- */
-void connection_disconnection(breep::tcp::peer_manager& /* peer_manager */, const breep::tcp::peer& peer) {
-	if (peer.is_connected()) {
-		// someone connected
-		std::cout << peer.id_as_string().substr(0, 4) << " connected!" << std::endl;
-	} else {
-		// someone disconnected
-		std::cout << peer.id_as_string().substr(0, 4) << " disconnected" << std::endl;
-	}
-}
+#include "networking.hpp"
 
 int main(int argc, char* argv[]) {
-	//
-	// if (argc != 2 && argc != 4) {
-	// 	std::cout << "Usage: " << argv[0] << " <hosting port> [<target ip> <target port>]" << std::endl;
-	// 	return 1;
-	// }
-	//
-	// // taking the local hosting port as parameter.
-	// breep::tcp::peer_manager peer_manager(static_cast<unsigned short>(atoi(argv[1])));
-	//
-	// // disabling logging.
-	// peer_manager.set_log_level(breep::log_level::none);
-	//
-	// std::cout << "you are " << peer_manager.self().id_as_string() << "." << std::endl;
-	//
-	// // adding listeners. Of course, more listeners could be added.
-	// breep::listener_id da_listener_id = peer_manager.add_data_listener(timed_message());
-	// breep::listener_id co_listener_id = peer_manager.add_connection_listener(&connection_disconnection);
-	// breep::listener_id dc_listener_id = peer_manager.add_disconnection_listener(&connection_disconnection);
-	//
-	//
-	// if (argc == 2) {
-	// 	// only hosting
-	// 	peer_manager.run();
-	// } else {
-	// 	// connecting to a remote peer.                                           v− address in string format (v4 or v6)
-	// 	boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[2]);
-	// 	//                                                    target port -v
-	// 	if (!peer_manager.connect(address, static_cast<unsigned short>(atoi(argv[3])))) {
-	// 		std::cout << "Connection failed" << std::endl;
-	// 		return 1;
-	// 	}
-	// }
-	//
-	//
-	// std::string ans;
-	// while(true) {
-	// 	std::getline(std::cin, ans);
-	//
-	// 	if (ans == "/q") {
-	// 		std::cout << "Leaving..." << std::endl;
-	// 		peer_manager.disconnect();
-	// 		break;
-	// 	} else {
-	// 		peer_manager.send_to_all(ans);
-	// 	}
-	// }
-	//
-	// // this is not obligatory, as the peer_manager is going out of scope anyway
-	// peer_manager.remove_data_listener(da_listener_id);
-	// peer_manager.remove_connection_listener(co_listener_id);
-	// peer_manager.remove_disconnection_listener(dc_listener_id);
+	if (argc != 2 && argc != 4) {
+		std::cout << "Usage: " << argv[0] << " <hosting port> [<target ip> <target port>]" << std::endl;
+		return 1;
+	}
 
-	// std::vector<std::string> v = {"bob"};
+	breep::tcp::network network(static_cast<unsigned short>(std::atoi(argv[1])));
+	NetworkedTangle t(network);
+
+	// Disabling all logs (set to 'warning' by default).
+	network.set_log_level(breep::log_level::none);
+
+	// If we receive a class for which we don't have any listener (such as an int, for example), this will be called.
+	network.set_unlistened_type_listener([](breep::tcp::network&,const breep::tcp::peer&,breep::deserializer&,bool,uint64_t) -> void {
+		std::cout << "Unidentified message received!" << std::endl;
+	});
+
+	if (argc == 2) {
+		// runs the network in another thread.
+		network.awake();
+
+		// If we are the host add a few transactions to the tangle
+		t.add(TransactionNode::create({t.getTips()[0]}, 100) );
+		t.add(TransactionNode::create({t.getTips()[0]}, 200) );
+	} else {
+		// let's try to connect to a buddy at address argv[2] and port argv[3]
+		boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[2]);
+		if(!network.connect(address, static_cast<unsigned short>(atoi(argv[3])))) {
+			// oh noes, it failed!
+			std::cout << "Connection failed." << std::endl;
+			return 1;
+		}
+
+		// If we are a client... ask the host for the tangle
+		network.send_object(NetworkedTangle::TangleSynchronizeRequest(t));
+	}
+
+	std::cout << "Connected to the network" << std::endl;
+
+	char cmd;
+	while((cmd = tolower(std::cin.get())) != 'q') {
+		if(cmd == 't')
+			t.add(TransactionNode::create(t.getTips(), 100 +
+				std::chrono::duration_cast<std::chrono::hours>(std::chrono::high_resolution_clock::now().time_since_epoch()).count())
+			);
+	}
+
+	network.disconnect();
+	std::cout << "Disconnected from the network" << std::endl;
+
+	std::cout << t.getTips()[0]->hash << std::endl;
+	// Tangle g;
+	// TransactionNode::ptr t = std::make_shared<TransactionNode>(std::vector<TransactionNode::ptr>{g.genesis}, 27.8);
+	// g.add(t);
 	//
-	// Transaction t(v, 27.8);
-	// std::cout << t.hash << " - " << t.amount << std::endl;
-
-	Tangle g;
-	TransactionNode::ptr t = std::make_shared<TransactionNode>(std::vector<TransactionNode::ptr>{g.genesis}, 27.8);
-	g.add(t);
-
-	std::cout << g.genesis->hash << " - " << g.genesis->amount << std::endl;
-	std::cout << t->hash << " - " << t->amount << " - " << g.genesis->children[0]->hash << std::endl;
-
-	std::cout << g.getTips()[0]->hash << std::endl;
-	g.removeTip(t);
-	std::cout << g.getTips()[0]->hash << std::endl;
+	// std::cout << g.genesis->hash << " - " << g.genesis->amount << std::endl;
+	// std::cout << t->hash << " - " << t->amount << " - " << g.genesis->children[0]->hash << std::endl;
+	//
+	// std::cout << g.getTips()[0]->hash << std::endl;
+	// g.removeTip(t);
+	// std::cout << g.getTips()[0]->hash << std::endl;
 }

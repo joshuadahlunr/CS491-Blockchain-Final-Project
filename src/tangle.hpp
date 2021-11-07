@@ -25,6 +25,11 @@ struct TransactionNode : public Transaction {
 			return out;
 		}(parents), amount), parents(parents) {}
 
+	// Function which creates a node ptr
+	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, const double amount) {
+		return std::make_shared<TransactionNode>(parents, amount);
+	}
+
 	// Function which finds a node given its hash
 	TransactionNode::ptr recursiveFind(Hash hash){
 		// If our hash matches... return a smart pointer to ourselves
