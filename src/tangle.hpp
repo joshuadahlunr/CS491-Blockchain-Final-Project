@@ -112,8 +112,8 @@ struct Tangle {
 		for(const TransactionNode::ptr& parent: node->parents)
 			std::erase(parent->children, node);
 
-		// Nulify the pased in reference to the node
-		std::cout << node.use_count() << std::endl;
+		// Nulify the passed in reference to the node
+		// std::cout << node.use_count() << std::endl;
 		node.reset((TransactionNode*) nullptr);
 	}
 
