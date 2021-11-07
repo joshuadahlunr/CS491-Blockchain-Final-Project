@@ -9,15 +9,17 @@
 
 #include "utility.hpp"
 
-struct Transaction {
-	using Hash = const std::string;
+// A hash is an immutable string
+typedef const std::string Hash;
 
+// Structure representing a transcation in the tangle
+struct Transaction {
 	const double amount;
 
 	const std::span<Hash> parentHashes;
 	Hash hash;
 
-	Transaction(std::span<Hash> parentHashes, double amount) : amount(amount),
+	Transaction(const std::span<Hash> parentHashes, const double amount) : amount(amount),
 		// Copy the parent hashes so that they are locally owned
 		parentHashes([](std::span<Hash> parentHashes) -> std::span<Hash> {
 			Hash* backing = new Hash[parentHashes.size()];

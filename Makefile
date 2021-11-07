@@ -1,6 +1,6 @@
 INCLUDES = -Ithirdparty -Ithirdparty/Breep/include
 LIBRARIES = -pthread -lboost_system
-FLAGS = -std=c++20
+FLAGS = -std=c++20 -g
 
 PROGRAM_NAME = tangle
 

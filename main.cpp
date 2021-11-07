@@ -26,6 +26,7 @@
 
 #include "utility.hpp"
 #include "transaction.hpp"
+#include "tangle.hpp"
 
 class timed_message {
 public:
@@ -121,6 +122,19 @@ int main(int argc, char* argv[]) {
 	// peer_manager.remove_connection_listener(co_listener_id);
 	// peer_manager.remove_disconnection_listener(dc_listener_id);
 
-	Transaction t(std::array<Transaction::Hash, 1>{"bob"}, 27.8);
-	std::cout << t.hash << " - " << t.amount << std::endl;
+	// std::vector<std::string> v = {"bob"};
+	//
+	// Transaction t(v, 27.8);
+	// std::cout << t.hash << " - " << t.amount << std::endl;
+
+	Tangle g;
+	TransactionNode::ptr t = std::make_shared<TransactionNode>(std::vector<TransactionNode::ptr>{g.genesis}, 27.8);
+	g.add(t);
+
+	std::cout << g.genesis->hash << " - " << g.genesis->amount << std::endl;
+	std::cout << t->hash << " - " << t->amount << " - " << g.genesis->children[0]->hash << std::endl;
+
+	std::cout << g.getTips()[0]->hash << std::endl;
+	g.removeTip(t);
+	std::cout << g.getTips()[0]->hash << std::endl;
 }
