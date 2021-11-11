@@ -30,12 +30,18 @@
 #include "networking.hpp"
 
 int main(int argc, char* argv[]) {
-	if (argc != 2 && argc != 4) {
-		std::cout << "Usage: " << argv[0] << " <hosting port> [<target ip> <target port>]" << std::endl;
+	if (argc != 1 && argc != 2) {
+		std::cout << "Usage: " << argv[0] << " [<target ip>]" << std::endl;
 		return 1;
 	}
 
-	breep::tcp::network network(static_cast<unsigned short>(std::atoi(argv[1])));
+	// Create an IO service used by the handshake algorithm
+	boost::asio::io_service io_service;
+
+	// Find an open port for us to listen on and create a network listening on it
+	unsigned short localPort = determineLocalPort();
+	breep::tcp::network network(localPort);
+	// Create a network synched tangle
 	NetworkedTangle t(network);
 
 	// Disabling all logs (set to 'warning' by default).
@@ -46,27 +52,46 @@ int main(int argc, char* argv[]) {
 		std::cout << "Unidentified message received!" << std::endl;
 	});
 
-	if (argc == 2) {
+
+
+	if (argc == 1) {
 		// runs the network in another thread.
 		network.awake();
+
+		std::cout << "Established a network on port " << localPort << std::endl;
 
 		// If we are the host add a few transactions to the tangle
 		t.add(TransactionNode::create({t.getTips()[0]}, 100) );
 		t.add(TransactionNode::create({t.getTips()[0]}, 200) );
 	} else {
-		// let's try to connect to a buddy at address argv[2] and port argv[3]
-		boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[2]);
-		if(!network.connect(address, static_cast<unsigned short>(atoi(argv[3])))) {
-			// oh noes, it failed!
-			std::cout << "Connection failed." << std::endl;
-			return 1;
+		std::cout << "Attempting to automatically connect to the network..." << std::endl;
+
+		// Find network connection (if we can't quickly find one ask for a manual port number)
+		boost::asio::ip::address address = boost::asio::ip::address::from_string(argv[1]);
+		unsigned short remotePort = handshake::determineRemotePort(io_service, address);
+		if(!network.connect(address, remotePort)){ // TODO: Hangs on invalid connection
+			std::cout << "Failed to connect to the network" << std::endl;
+			return 2;
 		}
 
-		// If we are a client... ask the host for the tangle
+		std::cout << "Connected to the network (listening on port " << localPort << ")" << std::endl;
+
+		// If we are a client... ask the network for the tangle
 		network.send_object(NetworkedTangle::TangleSynchronizeRequest(t));
 	}
 
-	std::cout << "Connected to the network" << std::endl;
+
+	// Find an open port for the handshake listener, and create a thread accepting handshakes
+	auto lp = determineLocalPort();
+	boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), lp));
+	bool handshakeThreadShouldRun = true;
+	std::thread handshakeThread([&acceptor, &io_service, localPort, &handshakeThreadShouldRun](){
+		while(handshakeThreadShouldRun)
+			handshake::acceptHandshakeConnection(acceptor, io_service, localPort);
+	});
+	std::cout << "Started handshake listener on port " << lp << std::endl;
+
+
 
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
@@ -80,14 +105,8 @@ int main(int argc, char* argv[]) {
 	std::cout << "Disconnected from the network" << std::endl;
 
 	std::cout << t.getTips()[0]->hash << std::endl;
-	// Tangle g;
-	// TransactionNode::ptr t = std::make_shared<TransactionNode>(std::vector<TransactionNode::ptr>{g.genesis}, 27.8);
-	// g.add(t);
-	//
-	// std::cout << g.genesis->hash << " - " << g.genesis->amount << std::endl;
-	// std::cout << t->hash << " - " << t->amount << " - " << g.genesis->children[0]->hash << std::endl;
-	//
-	// std::cout << g.getTips()[0]->hash << std::endl;
-	// g.removeTip(t);
-	// std::cout << g.getTips()[0]->hash << std::endl;
+
+	// Clean up the handshake thread
+	handshakeThreadShouldRun = false;
+	handshakeThread.detach();
 }

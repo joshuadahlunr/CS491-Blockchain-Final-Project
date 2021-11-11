@@ -4,9 +4,68 @@
 #include "tangle.hpp"
 #include <list>
 
+#define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <boost/uuid/uuid_io.hpp>
 #include <breep/network/tcp.hpp>
 #include <breep/util/serialization.hpp>
+
+// The default port to start searching for ports at
+#define DEFAULT_PORT_NUMBER 12345;
+
+// Function which attempts to remotely read data from a sodket until the <timeout> amount of time has elapsed
+// Returns true if the read was succesful, false otherwise
+template <typename MutableBufferSequence, typename Duration>
+bool readWithTimeout(boost::asio::io_service& io_service, boost::asio::ip::tcp::socket& sock, const MutableBufferSequence& buffers, Duration timeout){
+	// Start a timer with <timeout> duration
+	std::optional<boost::system::error_code> timer_result;
+	boost::asio::steady_timer timer(io_service);
+	timer.expires_from_now(timeout);
+	// Have the timer store its result when done
+	timer.async_wait([&timer_result](const boost::system::error_code& error){
+		timer_result = error;
+	});
+
+
+	// Begin an async read, saving the error code which results
+	std::optional<boost::system::error_code> read_result;
+	sock.async_read_some(buffers, [&read_result](const boost::system::error_code& error, std::size_t bytes_transferred){
+		read_result = error;
+	});
+
+	// Wait for the read or the timer to finish
+	io_service.reset();
+	while (io_service.run_one()) {
+		if (read_result)
+			timer.cancel();
+		else if (timer_result)
+			sock.cancel();
+	}
+
+	// If there was an error reading... propigate it
+	if (*read_result)
+		throw boost::system::system_error(*read_result);
+
+	// If there was no problem reading... return success
+	if(read_result && read_result == boost::system::errc::success)
+		return true;
+	// Otherwise... return failure
+	return false;
+}
+
+// Function which finds a free port to listen on
+unsigned short determineLocalPort();
+
+namespace handshake {
+	// Function which runs in a thread... looking for handshake pings
+	void acceptHandshakeConnection(boost::asio::ip::tcp::acceptor& acceptor, boost::asio::io_service& io_service, unsigned short localNetworkPort);
+
+	// Function which pings ports on a remote address for connectivity
+	unsigned short determineRemotePort(boost::asio::io_service& io_service, boost::asio::ip::address& address);
+}
+
+
+// -- Networked Tangle --
+
 
 // Class which provides a network syncronization for a tangle
 struct NetworkedTangle: public Tangle {
