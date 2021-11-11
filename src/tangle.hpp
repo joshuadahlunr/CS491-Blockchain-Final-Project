@@ -6,6 +6,8 @@
 
 #include "transaction.hpp"
 
+struct Tangle;
+
 // Transaction nodes act as a wrapper around transactions, providing graph connectivity information
 struct TransactionNode : public Transaction {
 	// Smart pointer type of the node
@@ -29,6 +31,9 @@ struct TransactionNode : public Transaction {
 	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, const double amount) {
 		return std::make_shared<TransactionNode>(parents, amount);
 	}
+
+	// Function which converts a transaction into a transaction node
+	static TransactionNode::ptr create(Tangle& t, const Transaction& trx);
 
 	// Function which finds a node given its hash
 	TransactionNode::ptr recursiveFind(Hash hash){

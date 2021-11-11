@@ -127,7 +127,7 @@ public:
 	struct TangleSynchronizeRequest {
 		// When we create a sync request mark that we are now listening for genesis syncs
 		TangleSynchronizeRequest() = default;
-		TangleSynchronizeRequest(NetworkedTangle& t) { t.listeningForGenesisSync = true; }
+		TangleSynchronizeRequest(NetworkedTangle& t) { t.listeningForGenesisSync = true; } // Use this constructor to mark the local tangle as accepting of requests
 
 		static void listener(breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& networkData, NetworkedTangle& t){
 			recursiveSendTangle(networkData.source, t, t.genesis);
@@ -164,7 +164,7 @@ public:
 				return;
 
 			std::vector<TransactionNode::ptr> parents; // Genesis transactions have no parents
-			(*(TransactionNode::ptr*) &t.genesis) = TransactionNode::create(parents, networkData.data.genesis.amount);
+			(*(TransactionNode::ptr*) &t.genesis) = TransactionNode::create(t, networkData.data.genesis);
 
 			std::cout << "Syncronized new genesis with hash `" + t.genesis->hash + "`" << std::endl;
 			t.listeningForGenesisSync = false;
@@ -212,7 +212,7 @@ public:
 			}
 
 			if(parentsFound) {
-				(*(Tangle*) &t).add(TransactionNode::create(parents, transaction.amount)); // Call the tangle version so that we don't spam the network with extra messages
+				(*(Tangle*) &t).add(TransactionNode::create(t, transaction)); // Call the tangle version so that we don't spam the network with extra messages
 				std::cout << "Added remote transaction with hash `" + transaction.hash + "` to the tangle" << std::endl;
 			}
 		}

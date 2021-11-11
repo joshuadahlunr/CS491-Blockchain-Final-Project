@@ -1,6 +1,7 @@
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
 
+#include <chrono>
 #include <string>
 #include <cryptopp/sha3.h>
 #include <cryptopp/filters.h>
@@ -17,6 +18,12 @@ namespace util {
 
 	    return replace(digest, "\n", ""); // Make sure there aren't any newlines
 		// TODO: does this replacement good cause problems?
+	}
+
+	// Converts the current time to UTC and returns the number of seconds since the epoch.
+	inline std::time_t utc_now() {
+		std::time_t time_now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    	return std::mktime(std::gmtime(&time_now_t));
 	}
 
 	// String extensions
