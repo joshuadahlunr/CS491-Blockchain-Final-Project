@@ -29,6 +29,8 @@
 #include "tangle.hpp"
 #include "networking.hpp"
 
+#include "keys.hpp"
+
 int main(int argc, char* argv[]) {
 	if (argc != 1 && argc != 2) {
 		std::cout << "Usage: " << argv[0] << " [<target ip>]" << std::endl;
@@ -51,6 +53,24 @@ int main(int argc, char* argv[]) {
 	network.set_unlistened_type_listener([](breep::tcp::network&,const breep::tcp::peer&,breep::deserializer&,bool,uint64_t) -> void {
 		std::cout << "Unidentified message received!" << std::endl;
 	});
+
+	key::KeyPair keys = key::generateKeyPair(CryptoPP::ASN1::secp160r1());
+	key::print(keys);
+
+	std::cout << sizeof(keys) << std::endl;
+
+	std::string message = "Yoda said, Do or do not. There is no try.";
+	std::string signature = key::signMessage(keys, message);
+
+	std::cout << message << " - " << signature << std::flush;
+	std::cout << " - " << key::verifyMessage(keys, message, signature) << std::endl;
+
+	auto bin = key::save(keys);
+	std::cout << bin.size() << " - "; util::bytes2stream(std::cout, bin) << std::endl;
+	key::KeyPair p = key::load(bin);
+
+	std::string compressed = util::compress(util::bytes2string(bin));
+	std::cout << bin.size() << " - " << compressed.size() << " - " << (util::decompress(compressed) == util::bytes2string(bin)) << std::endl;
 
 
 
@@ -90,6 +110,9 @@ int main(int argc, char* argv[]) {
 			handshake::acceptHandshakeConnection(acceptor, io_service, localPort);
 	});
 	std::cout << "Started handshake listener on port " << lp << std::endl;
+
+
+
 
 
 
