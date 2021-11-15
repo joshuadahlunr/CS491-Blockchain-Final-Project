@@ -262,15 +262,15 @@ public:
 		}
 	};
 
-	// Message which causes the recipient to add a new transaction to their graph
-	struct AddTransactionRequest {
+	// Base message which causes the recipient to add a new transaction to their graph
+	struct AddTransactionRequestBase {
 		Hash validityHash = INVALID_HASH;
 		std::string validitySignature;
 		Transaction transaction;
-		AddTransactionRequest() = default;
-		AddTransactionRequest(Transaction& _transaction, const key::KeyPair& keys) : validityHash(_transaction.hash), validitySignature(key::signMessage(keys, validityHash)), transaction(_transaction) {}
+		AddTransactionRequestBase() = default;
+		AddTransactionRequestBase(Transaction& _transaction, const key::KeyPair& keys) : validityHash(_transaction.hash), validitySignature(key::signMessage(keys, validityHash)), transaction(_transaction) {}
 
-		static void listener(breep::tcp::netdata_wrapper<AddTransactionRequest>& networkData, NetworkedTangle& t){
+		static void listener(breep::tcp::netdata_wrapper<AddTransactionRequestBase>& networkData, NetworkedTangle& t){
 			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
 			if(networkData.data.transaction.hash != networkData.data.validityHash)
 				throw Transaction::InvalidHash(networkData.data.validityHash, networkData.data.transaction.hash); // TODO: Exception caught by Breep, need alternative error handling?
@@ -332,12 +332,24 @@ public:
 		}
 	};
 
+	// Message which causes the recipient to add a transaction to their graph
+	struct AddTransactionRequest: public AddTransactionRequestBase {
+		using AddTransactionRequestBase::AddTransactionRequestBase;
+
+		static void listener(breep::tcp::netdata_wrapper<AddTransactionRequest>& networkData, NetworkedTangle& t){
+			// TODO: should we check if a transaction is too old?
+
+			AddTransactionRequestBase::listener((*(breep::tcp::netdata_wrapper<AddTransactionRequestBase>*) &networkData), t); // TODO: is this a valid cast?
+		}
+	};
+
+
 	// Message which causes the recipient to add a transaction to their graph (has specialized rule relaxations due to initial synchronization)
-	struct SynchronizationAddTransactionRequest: public AddTransactionRequest {
-		using AddTransactionRequest::AddTransactionRequest;
+	struct SynchronizationAddTransactionRequest: public AddTransactionRequestBase {
+		using AddTransactionRequestBase::AddTransactionRequestBase;
 
 		static void listener(breep::tcp::netdata_wrapper<SynchronizationAddTransactionRequest>& networkData, NetworkedTangle& t){
-			AddTransactionRequest::listener((*(breep::tcp::netdata_wrapper<AddTransactionRequest>*) &networkData), t); // TODO: is this a valid cast?
+			AddTransactionRequestBase::listener((*(breep::tcp::netdata_wrapper<AddTransactionRequestBase>*) &networkData), t); // TODO: is this a valid cast?
 		}
 	};
 };
