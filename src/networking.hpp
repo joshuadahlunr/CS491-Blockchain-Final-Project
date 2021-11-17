@@ -391,51 +391,78 @@ inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle
 inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::TangleSynchronizeRequest& r) { return d; }
 BREEP_DECLARE_TYPE(NetworkedTangle::TangleSynchronizeRequest)
 
-inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::SyncGenesisRequest& r) {
+inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangle::SyncGenesisRequest& r) {
+	breep::serializer s;
 	s << r.validityHash;
 	s << r.validitySignature;
 	s << r.genesis;
-	return s;
+
+	auto uncompressed = s.str();
+	_s << util::compress(*(std::string*) &uncompressed);
+	return _s;
 }
-inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::SyncGenesisRequest& r) {
+inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle::SyncGenesisRequest& r) {
+	std::basic_string<unsigned char> compressed;
+	_d >> compressed;
+	auto uncompressed = util::decompress(*(std::string*) &compressed);
+	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
+
 	std::string validityHash;
 	d >> validityHash;
 	(*(std::string*) &r.validityHash) = validityHash;
 	d >> r.validitySignature;
 	d >> r.genesis;
-	return d;
+	return _d;
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::SyncGenesisRequest)
 
-inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::AddTransactionRequest& r) {
+inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangle::AddTransactionRequest& r) {
+	breep::serializer s;
 	s << r.validityHash;
 	s << r.validitySignature;
 	s << r.transaction;
-	return s;
+
+	auto uncompressed = s.str();
+	_s << util::compress(*(std::string*) &uncompressed);
+	return _s;
 }
-inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::AddTransactionRequest& r) {
+inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle::AddTransactionRequest& r) {
+	std::basic_string<unsigned char> compressed;
+	_d >> compressed;
+	auto uncompressed = util::decompress(*(std::string*) &compressed);
+	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
+
 	std::string validityHash;
 	d >> validityHash;
 	(*(std::string*) &r.validityHash) = validityHash;
 	d >> r.validitySignature;
 	d >> r.transaction;
-	return d;
+	return _d;
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::AddTransactionRequest)
 
-inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::SynchronizationAddTransactionRequest& r) {
+inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangle::SynchronizationAddTransactionRequest& r) {
+	breep::serializer s;
 	s << r.validityHash;
 	s << r.validitySignature;
 	s << r.transaction;
-	return s;
+
+	auto uncompressed = s.str();
+	_s << util::compress(*(std::string*) &uncompressed);
+	return _s;
 }
-inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::SynchronizationAddTransactionRequest& r) {
+inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle::SynchronizationAddTransactionRequest& r) {
+	std::basic_string<unsigned char> compressed;
+	_d >> compressed;
+	auto uncompressed = util::decompress(*(std::string*) &compressed);
+	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
+	
 	std::string validityHash;
 	d >> validityHash;
 	(*(std::string*) &r.validityHash) = validityHash;
 	d >> r.validitySignature;
 	d >> r.transaction;
-	return d;
+	return _d;
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::SynchronizationAddTransactionRequest)
 
