@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <exception>
+#include <mutex>
 
 #include "transaction.hpp"
 
@@ -77,6 +78,12 @@ struct Tangle {
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
 
+protected:
+	// Mutex used to syncronize modifications across threads
+	std::mutex mutex;
+
+public:
+
 	// Upon creation generate a genesis block
 	Tangle() : genesis([]() -> TransactionNode::ptr {
 		std::vector<TransactionNode::ptr> parents;
@@ -122,10 +129,14 @@ struct Tangle {
 					throw std::runtime_error("Transaction with hash `" + parent->hash + "` already has a child with hash `" + node->hash + "`");
 		}
 
-		// For each parent of the new node... add the node as a child of that parent
-		// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
-		for(const TransactionNode::ptr& parent: node->parents)
-			parent->children.push_back(node);
+		{ // Begin Critical Region
+			std::scoped_lock lock(mutex);
+
+			// For each parent of the new node... add the node as a child of that parent
+			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
+			for(const TransactionNode::ptr& parent: node->parents)
+				parent->children.push_back(node);
+		} // End Critical Region
 
 		// Return the hash of the node
 		return node->hash;
@@ -141,9 +152,13 @@ struct Tangle {
 		if(!node->children.empty())
 			throw std::runtime_error("Only tip nodes can be removed from the graph. Tried to remove non-tip with hash `" + node->hash + "`");
 
-		// Remove the node as a child from each of its parents
-		for(const TransactionNode::ptr& parent: node->parents)
-			std::erase(parent->children, node);
+		{ // Begin Critical Region
+			std::scoped_lock lock(mutex);
+
+			// Remove the node as a child from each of its parents
+			for(const TransactionNode::ptr& parent: node->parents)
+				std::erase(parent->children, node);
+		} // End Critical Region
 
 		// Nulify the passed in reference to the node
 		// std::cout << node.use_count() << std::endl;
