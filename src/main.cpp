@@ -66,9 +66,14 @@ int main(int argc, char* argv[]) {
 
 		std::cout << "Established a network on port " << localPort << std::endl;
 
+		std::vector<Transaction::Input> inputs;
+		inputs.emplace_back(*t.personalKeys, 100.0);
+		std::vector<Transaction::Output> outputs;
+		outputs.push_back({t.personalKeys->pub, 100.0});
+
 		// If we are the host add a few transactions to the tangle
-		t.add(TransactionNode::create({t.getTips()[0]}, 100) );
-		t.add(TransactionNode::create({t.getTips()[0]}, 200) );
+		t.add(TransactionNode::create(t.getTips(), inputs, outputs) );
+		t.add(TransactionNode::create(t.getTips(), inputs, outputs) );
 	} else {
 		std::cout << "Attempting to automatically connect to the network..." << std::endl;
 
@@ -103,7 +108,8 @@ int main(int argc, char* argv[]) {
 	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
-
+	// TODO: debug dump the graph
+	// TODO: connection always fails when connecting to secondary client
 
 
 
@@ -112,9 +118,12 @@ int main(int argc, char* argv[]) {
 		switch(cmd){
 		// Create transaction
 		case 't':
-			t.add(TransactionNode::create(t.getTips(), 100 +
-				std::chrono::duration_cast<std::chrono::hours>(std::chrono::high_resolution_clock::now().time_since_epoch()).count())
-			);
+			std::vector<Transaction::Input> inputs;
+			inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
+			std::vector<Transaction::Output> outputs;
+			outputs.push_back({t.peerKeys[network.peers().begin()->second.id()], 100.0});
+
+			t.add(TransactionNode::create(t.getTips(), inputs, outputs));
 			break;
 		}
 	}

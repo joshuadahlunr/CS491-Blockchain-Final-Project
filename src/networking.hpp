@@ -239,8 +239,10 @@ public:
 			if(t.genesis->hash == networkData.data.genesis.hash)
 				return;
 			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
-			if(networkData.data.genesis.hash != networkData.data.validityHash)
+			if(networkData.data.genesis.hash != networkData.data.validityHash){
+				std::cerr << "Remote transaction with hash `" << networkData.data.genesis.hash << "` does not match its remote integrity hash `" << networkData.data.validityHash << "` discarding." << std::endl;
 				throw Transaction::InvalidHash(networkData.data.validityHash, networkData.data.genesis.hash); // TODO: Exception caught by Breep, need alternative error handling?
+			}
 
 			// If we don't have the sender's public key, ask for it and then ask them to resend the tangle
 			if(!t.peerKeys.contains(networkData.source.id())){
@@ -250,14 +252,20 @@ public:
 			}
 			// If we can't verify the transaction discard it
 			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], networkData.data.genesis.hash, networkData.data.validitySignature)){
-				std::cerr << "Syncing of genesis block with hash `" + networkData.data.genesis.hash + "` failed, sender's identity failed to be verified, discarding." << std::endl;
+				std::cerr << "Syncing of genesis with hash `" + networkData.data.genesis.hash + "` failed, sender's identity failed to be verified, discarding." << std::endl;
+				return;
+			}
+
+			// Ensure the genesis transaction doesn't have any inputs
+			if(!networkData.data.genesis.inputs.empty()){
+				std::cerr << "Remote genesis with hash `" + networkData.data.genesis.hash + "` failed, genesis transactions can't have inputs!" << std::endl;
 				return;
 			}
 
 			std::vector<TransactionNode::ptr> parents; // Genesis transactions have no parents
 			(*(TransactionNode::ptr*) &t.genesis) = TransactionNode::create(t, networkData.data.genesis);
 
-			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "`" << std::endl;
+			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "` from `" << networkData.source.id() << "`" << std::endl;
 			t.listeningForGenesisSync = false;
 		}
 	};
@@ -271,11 +279,15 @@ public:
 		AddTransactionRequestBase(Transaction& _transaction, const key::KeyPair& keys) : validityHash(_transaction.hash), validitySignature(key::signMessage(keys, validityHash)), transaction(_transaction) {}
 
 		static void listener(breep::tcp::netdata_wrapper<AddTransactionRequestBase>& networkData, NetworkedTangle& t){
-			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
-			if(networkData.data.transaction.hash != networkData.data.validityHash)
-				throw Transaction::InvalidHash(networkData.data.validityHash, networkData.data.transaction.hash); // TODO: Exception caught by Breep, need alternative error handling?
+			const Transaction& transaction = networkData.data.transaction;
 
-			attemptToAddTransaction(networkData.data.transaction, {networkData.source.id(), networkData.data.validitySignature}, t);
+			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
+			if(transaction.hash != networkData.data.validityHash){
+				std::cerr << "Remote transaction with hash `" << transaction.hash << "` does not match its remote integrity hash `" << networkData.data.validityHash << "` discarding." << std::endl;
+				throw Transaction::InvalidHash(networkData.data.validityHash, transaction.hash); // TODO: Exception caught by Breep, need alternative error handling?
+			}
+
+			attemptToAddTransaction(transaction, {networkData.source.id(), networkData.data.validitySignature}, t);
 
 			size_t listSize = t.networkQueue.size();
 			for(size_t i = 0; i < listSize; i++){
@@ -285,7 +297,7 @@ public:
 				attemptToAddTransaction(frontTrx, frontSig, t);
 			}
 
-			std::cout << "Processed remote transaction add with hash `" + networkData.data.transaction.hash + "` from " << networkData.source.id() << std::endl;
+			std::cout << "Processed remote transaction add with hash `" + transaction.hash + "` from " << networkData.source.id() << std::endl;
 		}
 
 	protected:

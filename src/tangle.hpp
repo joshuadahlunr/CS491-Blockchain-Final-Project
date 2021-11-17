@@ -18,18 +18,18 @@ struct TransactionNode : public Transaction {
 	// List of children of the node
 	std::vector<TransactionNode::ptr> children;
 
-	TransactionNode(const std::vector<TransactionNode::ptr> parents, const double amount) :
+	TransactionNode(const std::vector<TransactionNode::ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs) :
 		// Upon construction, construct the base transaction with the hashes of the parent nodes
 		Transaction([](const std::vector<TransactionNode::ptr>& parents) -> std::vector<std::string> {
 			std::vector<std::string> out;
 			for(const TransactionNode::ptr& p: parents)
 				out.push_back(p->hash);
 			return out;
-		}(parents), amount), parents(parents) {}
+		}(parents), inputs, outputs), parents(parents) {}
 
 	// Function which creates a node ptr
-	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, const double amount) {
-		return std::make_shared<TransactionNode>(parents, amount);
+	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, std::vector<Input> inputs, std::vector<Output> outputs) {
+		return std::make_shared<TransactionNode>(parents, inputs, outputs);
 	}
 
 	// Function which converts a transaction into a transaction node
@@ -69,7 +69,9 @@ struct Tangle {
 	// Upon creation generate a genesis block
 	Tangle() : genesis([]() -> TransactionNode::ptr {
 		std::vector<TransactionNode::ptr> parents;
-		return std::make_shared<TransactionNode>(parents, 1000000000);
+		std::vector<Transaction::Input> inputs;
+		std::vector<Transaction::Output> outputs;
+		return std::make_shared<TransactionNode>(parents, inputs, outputs);
 	}()) {}
 
 	// Clean up the graph in memory on exit
@@ -85,8 +87,15 @@ struct Tangle {
 		return genesis->recursiveFind(hash);
 	}
 
-	// Function which adds a node to the hashm
+	// Function which adds a node to the tangle
 	Hash add(TransactionNode::ptr node){
+		// Ensure that the transaction passes verification
+		if(!node->validateTransaction())
+			throw std::runtime_error("Transaction with hash `" + node->hash + "` failed to pass validation, discarding.");
+		// Ensure that the inputs are greater than or equal to the outputs
+		if(!node->validateTransactionTotals())
+			throw std::runtime_error("Transaction with hash `" + node->hash + "` tried to generate something from nothing, discarding.");
+
 		// For each parent of the new node... preform error validation
 		for(const TransactionNode::ptr& parent: node->parents) {
 			// Make sure the parent is in the graph
@@ -96,7 +105,7 @@ struct Tangle {
 			// Make sure the node isn't already a child of the parent
 			for(const TransactionNode::ptr& child: parent->children)
 				if(child->hash == node->hash)
-					throw std::runtime_error("Node with hash `" + parent->hash + "` already has a child with hash `" + node->hash + "`");
+					throw std::runtime_error("Transaction with hash `" + parent->hash + "` already has a child with hash `" + node->hash + "`");
 		}
 
 		// For each parent of the new node... add the node as a child of that parent
