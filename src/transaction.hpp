@@ -7,6 +7,7 @@
 #include <span>
 #include <iostream>
 #include <exception>
+#include <iomanip>
 
 #include <breep/util/serialization.hpp>
 
@@ -118,6 +119,25 @@ struct Transaction {
 			throw InvalidHash(validate, hash);
 
 		return *this;
+	}
+
+	void debugDump(){
+		std::cout << "Hash: " << hash << std::endl
+			<< "Parent Hashes: [";
+		for(auto& p: parentHashes)
+			std::cout << p << ", ";
+		std::cout << " ]" << std::endl;
+
+		std::cout << "Timestamp: " << std::put_time(std::localtime((time_t*) &timestamp), "%c %Z") << std::endl;
+
+		std::cout << "Inputs: [" << std::endl;
+		for(auto& i: inputs)
+			std::cout << "\t Account: (" << i.account.GetPublicElement().x << ", " << i.account.GetPublicElement().y << "), Amount: " << i.amount << std::endl;
+		std::cout << "]" << std::endl
+			<< "Outputs: [" << std::endl;
+		for(auto& o: outputs)
+			std::cout << "\t Account: (" << o.account.GetPublicElement().x << ", " << o.account.GetPublicElement().y << "), Amount: " << o.amount << std::endl;
+		std::cout << "]" << std::endl;
 	}
 
 	// Function which checks if the total value coming into a transaction is at least the value coming out of the transaction

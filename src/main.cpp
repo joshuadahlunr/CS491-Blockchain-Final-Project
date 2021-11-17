@@ -1,21 +1,5 @@
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-//                                                                                               //
-// Copyright 2017 Lucas Lazare.                                                                  //
-// This file is part of Breep project which is released under the                                //
-// European Union Public License v1.1. If a copy of the EUPL was                                 //
-// not distributed with this software, you can obtain one at :                                   //
-// https://joinup.ec.europa.eu/community/eupl/og_page/european-union-public-licence-eupl-v11     //
-//                                                                                               //
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-/**
- * @file chat/main.cpp
- * @author Lucas Lazare
- */
-
 #include <iostream>
 #include <vector>
 #include <chrono>
@@ -108,7 +92,7 @@ int main(int argc, char* argv[]) {
 	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
-	// TODO: debug dump the graph
+
 	// TODO: connection always fails when connecting to secondary client
 
 
@@ -118,20 +102,40 @@ int main(int argc, char* argv[]) {
 		switch(cmd){
 		// Create transaction
 		case 't':
-			std::vector<Transaction::Input> inputs;
-			inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
-			std::vector<Transaction::Output> outputs;
-			outputs.push_back({t.peerKeys[network.peers().begin()->second.id()], 100.0});
+			{
+				std::vector<Transaction::Input> inputs;
+				inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
+				std::vector<Transaction::Output> outputs;
+				outputs.push_back({t.peerKeys[network.peers().begin()->second.id()], 100.0});
 
-			t.add(TransactionNode::create(t.getTips(), inputs, outputs));
+				t.add(TransactionNode::create(t.getTips(), inputs, outputs));
+			}
+			break;
+
+		// Debug output
+		case 'd':
+			{
+				// Print out the whole tangle
+				t.debugDump();
+				std::cout << std::endl;
+
+				// Read transaction hash
+				std::string hash = "";
+				std::getline(std::cin, hash);
+				std::cout << "Enter transaction hash (blank for genesis): ";
+				std::getline(std::cin, hash);
+
+				// Print out the requested transaction, or the genesis tranaction if no transaction provided
+				auto trx = t.find(hash);
+				if(trx) trx->debugDump();
+				else t.genesis->debugDump();
+			}
 			break;
 		}
 	}
 
 	network.disconnect();
 	std::cout << "Disconnected from the network" << std::endl;
-
-	std::cout << t.getTips()[0]->hash << std::endl;
 
 	// Clean up the handshake thread
 	handshakeThreadShouldRun = false;

@@ -56,6 +56,17 @@ struct TransactionNode : public Transaction {
 		// If the hash doesn't exist in the children return a nullptr
 		return nullptr;
 	}
+
+	// Function which recursively prints out all of nodes in the graph
+	void recursiveDebugDump(size_t depth = 0){
+		std::cout << std::string(depth, ' ') << hash << " children: [ ";
+		for(auto& child: children)
+			std::cout << child->hash << ", ";
+		std::cout << "]" << std::endl;
+
+		for(auto& child: children)
+			child->recursiveDebugDump(depth + 1);
+	}
 };
 
 // Class holding the graph which represents our local Tangle
@@ -141,6 +152,12 @@ struct Tangle {
 		std::vector<TransactionNode::ptr> out;
 		recursiveGetTips(genesis, out);
 		return out;
+	}
+
+	// Function which prints out the tangle
+	void debugDump(){
+		std::cout << "Genesis: " << std::endl;
+		genesis->recursiveDebugDump();
 	}
 
 	// TODO: need to add a biased random walk implementation
