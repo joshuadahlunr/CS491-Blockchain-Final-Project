@@ -12,6 +12,9 @@
 
 namespace util {
 
+	template<typename T> typename std::remove_cv<T>::type* makeMutable(const T* in) { return (T*) in; }
+	template<typename T> typename std::remove_cv<T>::type& makeMutable(const T& in) { return *((T*) &in); }
+
 	inline std::string replace(const std::string base, const std::string_view& toFind, const std::string_view& toReplace, size_t pos = 0, size_t maxReplacements = -1);
 	// Function which hashes the provided string
 	inline std::string hash(std::string in){

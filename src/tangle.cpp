@@ -9,8 +9,9 @@ TransactionNode::ptr TransactionNode::create(Tangle& t, const Transaction& trx) 
 		else throw Tangle::NodeNotFoundException(hash);
 
 	auto out = create(parents, trx.inputs, trx.outputs);
-	(*(int64_t*) &out->timestamp) = trx.timestamp;
+	util::makeMutable(out->timestamp) = trx.timestamp;
 	(*(std::string*) &out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overridden
+	util::makeMutable(out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overridden
 
 	return out;
 }

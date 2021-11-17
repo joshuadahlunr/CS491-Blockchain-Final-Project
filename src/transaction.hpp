@@ -88,16 +88,17 @@ struct Transaction {
 	}
 
 	Transaction& operator=(const Transaction& _new){
-		(*(int64_t*) &timestamp) = _new.timestamp;
+		util::makeMutable(timestamp) = _new.timestamp;
 		(*(std::vector<Input>*) &inputs) = _new.inputs;
-		(*(std::vector<Output>*) &outputs) = _new.outputs;
+		util::makeMutable(inputs) = _new.inputs;
+		util::makeMutable(outputs) = _new.outputs;
 
 		Hash* backing = new Hash[_new.parentHashes.size()];
 		for(size_t i = 0; i < _new.parentHashes.size(); i++)
-			(*((std::string*) backing + i)) = _new.parentHashes[i]; // Drop the const to allow a copy to occur
+			*util::makeMutable(backing + i) = _new.parentHashes[i]; // Drop the const to allow a copy to occur
 
-		(*(std::span<Hash>*) &parentHashes) = {backing, _new.parentHashes.size()};
-		(*(std::string*) &hash) = _new.hash;
+		util::makeMutable(parentHashes) = {backing, _new.parentHashes.size()};
+		util::makeMutable(hash) = _new.hash;
 
 		Hash validate = hashTransaction();
 		if(validate != hash)
@@ -107,12 +108,13 @@ struct Transaction {
 	}
 
 	Transaction& operator=(Transaction&& _new){
-		(*(int64_t*) &timestamp) = _new.timestamp;
+		util::makeMutable(timestamp) = _new.timestamp;
 		(*(std::vector<Input>*) &inputs) = std::move(_new.inputs);
-		(*(std::vector<Output>*) &outputs) = std::move(_new.outputs);
-		(*(std::span<Hash>*) &parentHashes) = _new.parentHashes;
-		(*(std::span<Hash>*) &_new.parentHashes) = {(Hash*) nullptr, 0}; // The memory is now managed by this object... not the other one
-		(*(std::string*) &hash) = _new.hash;
+		util::makeMutable(inputs) = std::move(_new.inputs);
+		util::makeMutable(outputs) = std::move(_new.outputs);
+		util::makeMutable(parentHashes) = _new.parentHashes;
+		util::makeMutable(_new.parentHashes) = {(Hash*) nullptr, 0}; // The memory is now managed by this object... not the other one
+		util::makeMutable(hash) = _new.hash;
 
 		Hash validate = hashTransaction();
 		if(validate != hash)
@@ -234,8 +236,9 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 	}
 
 	t = Transaction(parentHashes, inputs, outputs);
-	(*(int64_t*) &t.timestamp) = timestamp;
+	util::makeMutable(t.timestamp) = timestamp;
 	(*(std::string*) &t.hash) = t.hashTransaction(); // Rehash since the timestamp has been overridden
+	util::makeMutable(t.hash) = t.hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 	return d;
 }
 
