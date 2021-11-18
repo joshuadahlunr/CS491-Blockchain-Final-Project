@@ -10,7 +10,7 @@ TransactionNode::ptr TransactionNode::create(Tangle& t, const Transaction& trx) 
 
 	auto out = create(parents, trx.amount);
 	(*(int64_t*) &out->timestamp) = trx.timestamp;
-	(*(std::string*) &out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overriden
+	(*(std::string*) &out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overridden
 
 	return out;
 }

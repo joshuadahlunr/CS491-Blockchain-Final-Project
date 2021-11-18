@@ -7,7 +7,7 @@
 
 namespace key {
 	using Byte = CryptoPP::byte;
-	// Key definitons
+	// Key definitions
 	using KeyBase = CryptoPP::ECDSA<CryptoPP::ECP, CryptoPP::SHA3_256>;
 	using PublicKey = KeyBase::PublicKey;
 	using PrivateKey = KeyBase::PrivateKey;
@@ -19,6 +19,9 @@ namespace key {
 	struct KeyPair {
 		const PrivateKey pri;
 		const PublicKey pub;
+
+		// Function which checks if the key pair properly sign and verify eachother
+		bool validate();
 	};
 
 	// Function which generates a private and public key pair
@@ -64,8 +67,6 @@ inline breep::serializer& operator<<(breep::serializer& s, const key::PublicKey&
 	std::vector<key::Byte> data = key::save(pub);
 	s << util::compress(util::bytes2string(data));
 
-	key::print(pub); // TODO: remove
-
 	return s;
 }
 inline breep::deserializer& operator>>(breep::deserializer& d, key::PublicKey& pub) {
@@ -75,8 +76,6 @@ inline breep::deserializer& operator>>(breep::deserializer& d, key::PublicKey& p
 
 	// Decompress it and load the key from it
 	pub = key::loadPublic(util::string2bytes<key::Byte>(util::decompress(compressed)));
-
-	key::print(pub); // TODO: remove
 
 	return d;
 }

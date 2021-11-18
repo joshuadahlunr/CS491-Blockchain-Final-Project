@@ -5,6 +5,13 @@
 
 namespace key {
 
+	// Function which checks if the key pair properly sign and verify eachother
+	bool KeyPair::validate(){
+		std::string message = "VALIDATION";
+		std::string signature = signMessage(*this, message);
+		return verifyMessage(*this, message, signature);
+	}
+
 	// Function which generates a private key
 	PrivateKey generatePrivateKey(const CryptoPP::OID& oid) {
 		CryptoPP::AutoSeededRandomPool prng;

@@ -58,7 +58,6 @@ struct Transaction {
 		return validate == hash;
 	}
 
-protected:
 	Hash hashTransaction(){
 		std::stringstream hash;
 		hash << timestamp;
@@ -132,7 +131,7 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 
 	t = Transaction(parentHashes, amount);
 	(*(int64_t*) &t.timestamp) = timestamp;
-	(*(std::string*) &t.hash) = t.hashTransaction(); // Rehash since the timestamp has been overriden
+	(*(std::string*) &t.hash) = t.hashTransaction(); // Rehash since the timestamp has been overridden
 	return d;
 }
 

@@ -45,7 +45,11 @@ namespace util {
 
 	// Function which converts a byte array into a string
 	template<typename Byte>
-	inline std::string bytes2string(std::vector<Byte> bytes){ return (char*) bytes.data(); }
+	inline std::string bytes2string(std::vector<Byte> bytes){
+		std::string out;
+		for(auto b: bytes) out += b;
+		return out;
+	}
 	// Function which converts a string into a byte array
 	template<typename Byte>
 	inline std::vector<Byte> string2bytes(std::string string){
@@ -58,7 +62,7 @@ namespace util {
 	std::ostream& bytes2stream(std::ostream& s, const std::vector<Byte>& bytes){
 		size_t size = bytes.size();
 		s.write((char*) &size, sizeof(size));
-		s.write((char*) bytes.data(), bytes.size() * sizeof(Byte));
+		s.write((char*) &bytes[0], bytes.size() * sizeof(Byte));
 		return s;
 	}
 	// Function which reads a byte array from a standard output stream

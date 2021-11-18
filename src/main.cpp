@@ -30,6 +30,7 @@
 #include "networking.hpp"
 
 #include "keys.hpp"
+#include "cryptopp/oids.h"
 
 int main(int argc, char* argv[]) {
 	if (argc != 1 && argc != 2) {
@@ -46,6 +47,9 @@ int main(int argc, char* argv[]) {
 	// Create a network synched tangle
 	NetworkedTangle t(network);
 
+	// TODO: Need a mechanism for saving generated keys and loading them
+	t.setKeyPair( std::make_shared<key::KeyPair>(key::generateKeyPair(CryptoPP::ASN1::secp160r1())) );
+
 	// Disabling all logs (set to 'warning' by default).
 	network.set_log_level(breep::log_level::none);
 
@@ -54,26 +58,8 @@ int main(int argc, char* argv[]) {
 		std::cout << "Unidentified message received!" << std::endl;
 	});
 
-	key::KeyPair keys = key::generateKeyPair(CryptoPP::ASN1::secp160r1());
-	key::print(keys);
 
-	std::cout << sizeof(keys) << std::endl;
-
-	std::string message = "Yoda said, Do or do not. There is no try.";
-	std::string signature = key::signMessage(keys, message);
-
-	std::cout << message << " - " << signature << std::flush;
-	std::cout << " - " << key::verifyMessage(keys, message, signature) << std::endl;
-
-	auto bin = key::save(keys);
-	std::cout << bin.size() << " - "; util::bytes2stream(std::cout, bin) << std::endl;
-	key::KeyPair p = key::load(bin);
-
-	std::string compressed = util::compress(util::bytes2string(bin));
-	std::cout << bin.size() << " - " << compressed.size() << " - " << (util::decompress(compressed) == util::bytes2string(bin)) << std::endl;
-
-
-
+	// Connect to the network
 	if (argc == 1) {
 		// runs the network in another thread.
 		network.awake();
@@ -94,10 +80,15 @@ int main(int argc, char* argv[]) {
 			return 2;
 		}
 
+		// Send our public key to the rest of the network
+		network.send_object(NetworkedTangle::PublicKeySyncRequest());
+		// Wait half a second
+		std::this_thread::sleep_for(std::chrono::milliseconds(500)); // TODO: Make this delay unessicary
+
 		std::cout << "Connected to the network (listening on port " << localPort << ")" << std::endl;
 
 		// If we are a client... ask the network for the tangle
-		network.send_object(NetworkedTangle::TangleSynchronizeRequest(t));
+		network.send_object(NetworkedTangle::TangleSynchronizeRequest(t)); // TODO: Only force us to sync keys with people we actually communicate with
 	}
 
 
@@ -118,10 +109,14 @@ int main(int argc, char* argv[]) {
 
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
-		if(cmd == 't')
+		switch(cmd){
+		// Create transaction
+		case 't':
 			t.add(TransactionNode::create(t.getTips(), 100 +
 				std::chrono::duration_cast<std::chrono::hours>(std::chrono::high_resolution_clock::now().time_since_epoch()).count())
 			);
+			break;
+		}
 	}
 
 	network.disconnect();
