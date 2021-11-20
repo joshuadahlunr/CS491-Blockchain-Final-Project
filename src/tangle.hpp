@@ -43,7 +43,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	static TransactionNode::ptr create(Tangle& t, const Transaction& trx);
 
 	// Function which finds a node given its hash
-	TransactionNode::ptr recursiveFind(Hash hash) {
+	TransactionNode::ptr recursiveFind(Hash& hash) {
 		// If our hash matches... return a smart pointer to ourselves
 		if(this->hash == hash){
 			// If we are the genesis node then the best we can do is convert the this pointer to a smart pointer
@@ -64,15 +64,33 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return nullptr;
 	}
 
+	// Function which recurisvely determines if the target is a child
+	bool isChild(TransactionNode::ptr& target){
+		for(auto& child: children){
+			// If this child is the target then it is a child of this node
+			if(child->hash == target->hash)
+				return true;
+			// Otherwise... look in the child's children
+			else return child->isChild(target);
+		}
+		// If none of the children or their children are the target it is not a child of this node
+		return false;
+	}
+
 	// Function which recursively prints out all of nodes in the graph
-	void recursiveDebugDump(size_t depth = 0) const {
+	void recursiveDebugDump(std::list<std::string>& foundNodes, size_t depth = 0) const {
+		// Only print out infromation about a node if it hasn't already been printed
+		if(std::find(foundNodes.begin(), foundNodes.end(), hash) != foundNodes.end()) return;
+
 		std::cout << std::string(depth, ' ') << hash << " children: [ ";
 		for(const TransactionNode::ptr& child: children)
 			std::cout << child->hash << ", ";
 		std::cout << "]" << std::endl;
 
 		for(const TransactionNode::ptr& child: children)
-			child->recursiveDebugDump(depth + 1);
+			child->recursiveDebugDump(foundNodes, depth + 1);
+
+		foundNodes.push_back(hash);
 	}
 
 
@@ -115,10 +133,22 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Randomly chose a child from the weighted list
 		auto index = rng.GenerateWord32(0, weightedList.size() - 1); // Inclusive generation so we must decrease the size of the list by 1
 		auto chosen = weightedList.begin();
-		for(int i = 0; i < index; i++) chosen++;
+		for(size_t i = 0; i < index; i++) chosen++;
 
 		// Recursively walk down the chosen child
 		return (*chosen)->biasedRandomWalk(alpha);
+	}
+
+	// Function which determines how confident the network is in a transaction
+	float confirmationConfidence(){
+		uint8_t confidence = 0;
+		for(size_t i = 0; i < 100; i++){
+			auto tip = biasedRandomWalk();
+			if(isChild(tip))
+				confidence++;
+		}
+
+		return confidence / 100.0;
 	}
 };
 
@@ -248,7 +278,8 @@ public:
 	// Function which prints out the tangle
 	void debugDump(){
 		std::cout << "Genesis: " << std::endl;
-		genesis->recursiveDebugDump();
+		std::list<std::string> foundNodes;
+		genesis->recursiveDebugDump(foundNodes);
 	}
 
 protected:
