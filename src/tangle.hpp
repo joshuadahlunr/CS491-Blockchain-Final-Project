@@ -4,16 +4,22 @@
 #include <memory>
 #include <exception>
 #include <mutex>
+#include <algorithm>
+#include <list>
+
+#include <cryptopp/osrng.h>
 
 #include "transaction.hpp"
 
 struct Tangle;
 
 // Transaction nodes act as a wrapper around transactions, providing graph connectivity information
-struct TransactionNode : public Transaction {
+struct TransactionNode : public Transaction, public std::enable_shared_from_this<TransactionNode> {
 	// Smart pointer type of the node
 	using ptr = std::shared_ptr<TransactionNode>;
 
+	// Variable tracking weather or not this transaction is the genesis transaction
+	const bool isGenesis = false; // TODO: should this go in the base transaction or here?
 	// Immutable list of parents of the node
 	const std::vector<TransactionNode::ptr> parents;
 	// List of children of the node
@@ -37,12 +43,12 @@ struct TransactionNode : public Transaction {
 	static TransactionNode::ptr create(Tangle& t, const Transaction& trx);
 
 	// Function which finds a node given its hash
-	TransactionNode::ptr recursiveFind(Hash hash){
+	TransactionNode::ptr recursiveFind(Hash hash) {
 		// If our hash matches... return a smart pointer to ourselves
 		if(this->hash == hash){
 			// If we are the genesis node then the best we can do is convert the this pointer to a smart pointer
 			if(parents.empty())
-				return ptr(this, [](TransactionNode*){}); // This pointer won't free the memory on destruction
+				return shared_from_this();
 			// Otherwise... find the pointer to ourselves in the first parent's list of child pointers
 			else for(const TransactionNode::ptr& parentsChild: parents[0]->children)
 				if(parentsChild->hash == hash)
@@ -50,7 +56,7 @@ struct TransactionNode : public Transaction {
 		}
 
 		// If our hash doesn't match check each child to see if it or its children contains the searched for hash
-		for(TransactionNode::ptr& child: children)
+		for(const TransactionNode::ptr& child: children)
 			if(auto recursiveResult = child->recursiveFind(hash); recursiveResult != nullptr)
 				return recursiveResult;
 
@@ -59,14 +65,60 @@ struct TransactionNode : public Transaction {
 	}
 
 	// Function which recursively prints out all of nodes in the graph
-	void recursiveDebugDump(size_t depth = 0){
+	void recursiveDebugDump(size_t depth = 0) const {
 		std::cout << std::string(depth, ' ') << hash << " children: [ ";
-		for(auto& child: children)
+		for(const TransactionNode::ptr& child: children)
 			std::cout << child->hash << ", ";
 		std::cout << "]" << std::endl;
 
-		for(auto& child: children)
+		for(const TransactionNode::ptr& child: children)
 			child->recursiveDebugDump(depth + 1);
+	}
+
+
+	// -- Consensus Functions
+
+
+	// Function which recursively calculates the weight of a transaction
+	size_t cumulativeWeight() const {
+		// Tips have weight 1
+		if(children.empty())
+			return 1;
+
+		size_t sum = 1;
+		for(const TransactionNode::ptr& child: children)
+			sum += child->cumulativeWeight();
+
+		return sum;
+	}
+
+	// Function which performes a biased random walk starting from the current node, and returns the tip it discovers
+	TransactionNode::ptr biasedRandomWalk(float alpha = 1.0){
+		// TODO: Whitepaper has more info on alpha
+
+		// Seed random number generator
+		static CryptoPP::AutoSeededRandomPool rng;
+
+		// If we are a tip get the shared pointer referencing us
+		if(children.empty())
+			return shared_from_this();
+
+		// Create a weighted list of children
+		std::list<TransactionNode*> weightedList;
+		for(TransactionNode::ptr& child: children){
+			auto weight = child->cumulativeWeight();
+			// Add weight * alpha copies of the child to the list
+			for(size_t i = 0; i < size_t(std::min(weight * alpha, 1.0f)); i++)
+				weightedList.push_back(child.get());
+		}
+
+		// Randomly chose a child from the weighted list
+		auto index = rng.GenerateWord32(0, weightedList.size() - 1); // Inclusive generation so we must decrease the size of the list by 1
+		auto chosen = weightedList.begin();
+		for(int i = 0; i < index; i++) chosen++;
+
+		// Recursively walk down the chosen child
+		return (*chosen)->biasedRandomWalk(alpha);
 	}
 };
 
@@ -75,10 +127,10 @@ struct Tangle {
 	// Exception thrown when a node can't be found in the graph
 	struct NodeNotFoundException : public std::runtime_error { NodeNotFoundException(Hash hash) : std::runtime_error("Failed to find node with hash `" + hash + "`") {} };
 
+protected:
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
 
-protected:
 	// Mutex used to syncronize modifications across threads
 	std::mutex mutex;
 
@@ -92,7 +144,7 @@ public:
 		return std::make_shared<TransactionNode>(parents, inputs, outputs);
 	}()) {}
 
-	// Clean up the graph in memory on exit
+	// Clean up the graph, in memory, on exit
 	~Tangle() {
 		// Repeatedly remove tips until the genesis node is the only node left in the graph
 		while(!genesis->children.empty())
@@ -100,13 +152,34 @@ public:
 				removeTip(tip);
 	}
 
+	// Function which sets the genesis node
+	void setGenesis(TransactionNode::ptr genesis){
+		// Mark this old node as the genesis
+		util::makeMutable(genesis->isGenesis) = true;
+
+		// Update the genesis
+		auto oldGenesis = this->genesis;
+		util::makeMutable(this->genesis) = genesis;
+
+		// Free the memory for every child of the old genesis (if it exists)
+		if(oldGenesis)
+			while(!oldGenesis->children.empty())
+				for(auto& tip: getTips())
+					removeTip(tip);
+	}
+
 	// Function which finds a node in the graph given its hash
 	TransactionNode::ptr find(Hash hash){
 		return genesis->recursiveFind(hash);
 	}
 
+	// Function which performs a biased random walk on the tangle
+	TransactionNode::ptr biasedRandomWalk(){
+		return genesis->biasedRandomWalk();
+	}
+
 	// Function which adds a node to the tangle
-	Hash add(TransactionNode::ptr node){
+	Hash add(const TransactionNode::ptr node){
 		// Ensure that the transaction passes verification
 		if(!node->validateTransaction())
 			throw std::runtime_error("Transaction with hash `" + node->hash + "` failed to pass validation, discarding.");
@@ -177,8 +250,6 @@ public:
 		std::cout << "Genesis: " << std::endl;
 		genesis->recursiveDebugDump();
 	}
-
-	// TODO: need to add a biased random walk implementation
 
 protected:
 	// Helper function which recursively finds all of the tips in the graph

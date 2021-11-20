@@ -134,9 +134,15 @@ int main(int argc, char* argv[]) {
 				std::vector<Transaction::Input> inputs;
 				inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
 				std::vector<Transaction::Output> outputs;
-				outputs.push_back({t.peerKeys[network->peers().begin()->second.id()], 100.0});
+				if(!network->peers().empty())
+					outputs.push_back({t.peerKeys[network->peers().begin()->second.id()], 100.0});
+				else outputs.push_back({t.peerKeys[network->self().id()], 100.0});
 
-				auto trx = TransactionNode::create(t.getTips(), inputs, outputs);
+				auto tip1 = t.biasedRandomWalk();
+				auto tip2 = t.biasedRandomWalk();
+
+				auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
+				if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
 				trx->mineTransaction();
 				t.add(trx);
 			}
@@ -152,13 +158,12 @@ int main(int argc, char* argv[]) {
 				// Read transaction hash
 				std::string hash = "";
 				std::getline(std::cin, hash);
-				std::cout << "Enter transaction hash (blank for genesis): ";
+				std::cout << "Enter transaction hash (blank = skip): ";
 				std::getline(std::cin, hash);
 
-				// Print out the requested transaction, or the genesis tranaction if no transaction provided
+				// Print out the requested transaction
 				auto trx = t.find(hash);
 				if(trx) trx->debugDump();
-				else t.genesis->debugDump();
 			}
 			break;
 		}
