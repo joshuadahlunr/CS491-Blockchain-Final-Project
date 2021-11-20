@@ -10,6 +10,7 @@
 #include <iomanip>
 
 #include <breep/util/serialization.hpp>
+#include <cryptopp/osrng.h>
 
 #include "timer.h"
 
@@ -49,6 +50,10 @@ struct Transaction {
 			contrib << amount;
 			return contrib.str();
 		}
+
+		Output() = default;
+		Output(const key::KeyPair& pair, const double amount) : account(pair.pub), amount(amount) {}
+		Output(key::PublicKey account, double amount) : account(account), amount(amount) {}
 	};
 
 	// A transaction input is an account, amount to take from that account, and a signed copy of the amount verifying that the sender aproves of the transaction
@@ -76,6 +81,12 @@ struct Transaction {
 
 	Transaction() = default;
 	Transaction(const std::span<Hash> parentHashes, const std::vector<Input>& inputs, const std::vector<Output>& outputs) : timestamp(util::utc_now()), inputs(inputs), outputs(outputs),
+		// Set a random initial value for the nonce
+		nonce([]() -> size_t {
+			// Seed random number generator
+			static CryptoPP::AutoSeededRandomPool rng;
+			return rng.GenerateWord32() + rng.GenerateWord32();
+		}()),
 		// Copy the parent hashes so that they are locally owned
 		parentHashes([](std::span<Hash> parentHashes) -> std::span<Hash> {
 			Hash* backing = new Hash[parentHashes.size()];

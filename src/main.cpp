@@ -70,25 +70,64 @@ int main(int argc, char* argv[]) {
 	});
 
 
-	// Connect to the network
+
+	// Establish a network...
 	if (argc == 1) {
-		// runs the network in another thread.
+		// Runs the network in another thread.
 		network->awake();
+		// Create a keypair for the network
+		std::shared_ptr<key::KeyPair> networkKeys = std::make_shared<key::KeyPair>(key::generateKeyPair(CryptoPP::ASN1::secp160r1()));
+
+		// Create a genesis which gives the network key "infinate" money
+		std::vector<TransactionNode::ptr> parents;
+		std::vector<Transaction::Input> inputs;
+		std::vector<Transaction::Output> outputs;
+		outputs.push_back({networkKeys->pub, std::numeric_limits<double>::max()});
+		t.setGenesis(TransactionNode::create(parents, inputs, outputs));
+
+		// Add a key response listener that give each key that connects to the network a million money
+		network->add_data_listener<NetworkedTangle::PublicKeySyncResponse>([networkKeys, &t](breep::tcp::netdata_wrapper<NetworkedTangle::PublicKeySyncResponse>& dw){
+			std::thread([networkKeys, &t, source = dw.source](){
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+				std::cout << "Sending `" << source.id() << "` a million money!" << std::endl;
+
+				std::vector<Transaction::Input> inputs;
+				inputs.emplace_back(*networkKeys, 1000000);
+				std::vector<Transaction::Output> outputs;
+				outputs.emplace_back(t.peerKeys[source.id()], 1000000);
+
+				auto tip1 = t.biasedRandomWalk();
+				auto tip2 = t.biasedRandomWalk();
+
+				auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
+				if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
+				trx->mineTransaction();
+				t.add(trx);
+			}).detach();
+		});
+
+		// Send us a million money
+		std::thread([networkKeys, &t](){
+			std::cout << "Sending us a million money!" << std::endl;
+
+			std::vector<Transaction::Input> inputs;
+			inputs.emplace_back(*networkKeys, 1000000);
+			std::vector<Transaction::Output> outputs;
+			outputs.emplace_back(*t.personalKeys, 1000000);
+
+			auto tip1 = t.biasedRandomWalk();
+			auto tip2 = t.biasedRandomWalk();
+
+			auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
+			if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
+			trx->mineTransaction();
+			t.add(trx);
+		}).detach();
 
 		std::cout << "Established a network on port " << localPort << std::endl;
 
-		std::vector<Transaction::Input> inputs;
-		inputs.emplace_back(*t.personalKeys, 100.0);
-		std::vector<Transaction::Output> outputs;
-		outputs.push_back({t.personalKeys->pub, 100.0});
-
-		// If we are the host add a few transactions to the tangle
-		auto trx = TransactionNode::create(t.getTips(), inputs, outputs);
-		trx->mineTransaction();
-		t.add(trx);
-		trx = TransactionNode::create(t.getTips(), inputs, outputs);
-		trx->mineTransaction();
-		t.add(trx);
+	// Otherwise connect to the network
 	} else {
 		std::cout << "Attempting to automatically connect to the network..." << std::endl;
 
@@ -128,6 +167,11 @@ int main(int argc, char* argv[]) {
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
 		switch(cmd){
+		// Clear the screen
+		case 'c':
+			system("clear");
+			break;
+			
 		// Create transaction
 		case 't':
 			{
@@ -135,8 +179,8 @@ int main(int argc, char* argv[]) {
 				inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
 				std::vector<Transaction::Output> outputs;
 				if(!network->peers().empty())
-					outputs.push_back({t.peerKeys[network->peers().begin()->second.id()], 100.0});
-				else outputs.push_back({t.peerKeys[network->self().id()], 100.0});
+					outputs.emplace_back(t.peerKeys[network->peers().begin()->second.id()], 100.0);
+				else outputs.emplace_back(t.peerKeys[network->self().id()], 100.0);
 
 				auto tip1 = t.biasedRandomWalk();
 				auto tip2 = t.biasedRandomWalk();
@@ -163,7 +207,10 @@ int main(int argc, char* argv[]) {
 
 				// Print out the requested transaction
 				auto trx = t.find(hash);
-				if(trx) trx->debugDump();
+				if(trx){
+					trx->debugDump();
+					std::cout << "Confidence: " << (trx->confirmationConfidence() * 100) << "%" << std::endl;
+				}
 			}
 			break;
 		}

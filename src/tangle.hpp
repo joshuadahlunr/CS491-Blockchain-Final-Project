@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <list>
 
-#include <cryptopp/osrng.h>
-
 #include "transaction.hpp"
 
 struct Tangle;
