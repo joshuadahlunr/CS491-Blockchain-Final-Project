@@ -99,14 +99,7 @@ int main(int argc, char* argv[]) {
 				inputs.emplace_back(*networkKeys, 1000000);
 				std::vector<Transaction::Output> outputs;
 				outputs.emplace_back(t.peerKeys[source.id()], 1000000);
-
-				auto tip1 = t.biasedRandomWalk();
-				auto tip2 = t.biasedRandomWalk();
-
-				auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
-				if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
-				trx->mineTransaction();
-				t.add(trx);
+				t.add(TransactionNode::createAndMine(t, inputs, outputs));
 			}).detach();
 		});
 
@@ -118,14 +111,7 @@ int main(int argc, char* argv[]) {
 			inputs.emplace_back(*networkKeys, 1000000);
 			std::vector<Transaction::Output> outputs;
 			outputs.emplace_back(*t.personalKeys, 1000000);
-
-			auto tip1 = t.biasedRandomWalk();
-			auto tip2 = t.biasedRandomWalk();
-
-			auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
-			if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
-			trx->mineTransaction();
-			t.add(trx);
+			t.add(TransactionNode::createAndMine(t, inputs, outputs));
 		}).detach();
 
 		std::cout << "Established a network on port " << localPort << std::endl;
@@ -191,13 +177,12 @@ int main(int argc, char* argv[]) {
 				}
 				else outputs.emplace_back(*t.personalKeys, 100.0);
 
-				auto tip1 = t.biasedRandomWalk();
-				auto tip2 = t.biasedRandomWalk();
+				try {
+					t.add(TransactionNode::createAndMine(t, inputs, outputs));
+				} catch (Tangle::InvalidBalance ib) {
+					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
+				}
 
-				auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs);
-				if(t.getTips().size() == 1) trx = TransactionNode::create({tip1}, inputs, outputs);
-				trx->mineTransaction();
-				t.add(trx);
 			}
 			break;
 

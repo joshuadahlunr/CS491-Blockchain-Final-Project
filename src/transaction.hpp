@@ -39,7 +39,7 @@ struct Transaction {
 	const uint8_t miningDifficulty = 3; // How many characters at the start of the hash must be the target
 	const char miningTarget = 'A'; // What character the first few characters of the hash must be
 
-	// A transaction output is an account and an amount to assign to that acount
+	// A transaction output is an account and an amount to assign to that account
 	struct Output {
 		key::PublicKey account;
 		double amount;
@@ -198,7 +198,7 @@ struct Transaction {
 		// Make sure the hash matches
 		good &= hashTransaction() == hash;
 
-		// Make sure all of the inputs aggreed to their contribution
+		// Make sure all of the inputs agreed to their contribution
 		for(const Input& input: inputs)
 			good &= key::verifyMessage(input.account, std::to_string(input.amount), input.signature);
 

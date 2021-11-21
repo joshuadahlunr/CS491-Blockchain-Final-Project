@@ -38,8 +38,11 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return std::make_shared<TransactionNode>(parents, inputs, outputs);
 	}
 
+	// Create a transaction node, automatically mining and performing consensus on it
+	static TransactionNode::ptr createAndMine(const Tangle& t, const std::vector<Input>& inputs, const std::vector<Output>& outputs);
+
 	// Function which converts a transaction into a transaction node
-	static TransactionNode::ptr create(Tangle& t, const Transaction& trx);
+	static TransactionNode::ptr create(const Tangle& t, const Transaction& trx);
 
 	// Function which finds a node given its hash
 	TransactionNode::ptr recursiveFind(Hash& hash) {
@@ -63,8 +66,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return nullptr;
 	}
 
-	// Function which recurisvely determines if the target is a child
-	bool isChild(TransactionNode::ptr& target){
+	// Function which recursively determines if the target is a child
+	bool isChild(TransactionNode::ptr& target) const {
 		for(auto& child: children){
 			// If this child is the target then it is a child of this node
 			if(child->hash == target->hash)
@@ -78,7 +81,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which recursively prints out all of nodes in the graph
 	void recursiveDebugDump(std::list<std::string>& foundNodes, size_t depth = 0) const {
-		// Only print out infromation about a node if it hasn't already been printed
+		// Only print out information about a node if it hasn't already been printed
 		if(std::find(foundNodes.begin(), foundNodes.end(), hash) != foundNodes.end()) return;
 
 		std::cout << std::string(depth, ' ') << hash << " children: [ ";
@@ -108,8 +111,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return sum;
 	}
 
-	// Function which performes a biased random walk starting from the current node, and returns the tip it discovers
-	TransactionNode::ptr biasedRandomWalk(float alpha = 1.0){
+	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
+	TransactionNode::ptr biasedRandomWalk(float alpha = 1.0) {
 		// TODO: Whitepaper has more info on alpha
 
 		// Seed random number generator
@@ -138,7 +141,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which determines how confident the network is in a transaction
-	float confirmationConfidence(){
+	float confirmationConfidence() {
 		uint8_t confidence = 0;
 		for(size_t i = 0; i < 100; i++){
 			auto tip = biasedRandomWalk();
@@ -146,6 +149,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 				confidence++;
 		}
 
+		// Convert the confidence to a fraction in the range [0, 1]
 		return confidence / 100.0;
 	}
 };
@@ -164,8 +168,7 @@ struct Tangle {
 protected:
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
-
-	// Mutex used to syncronize modifications across threads
+	// Mutex used to synchronize modifications across threads
 	std::mutex mutex;
 
 public:
@@ -203,12 +206,12 @@ public:
 	}
 
 	// Function which finds a node in the graph given its hash
-	TransactionNode::ptr find(Hash hash){
+	TransactionNode::ptr find(Hash hash) const {
 		return genesis->recursiveFind(hash);
 	}
 
 	// Function which performs a biased random walk on the tangle
-	TransactionNode::ptr biasedRandomWalk(){
+	TransactionNode::ptr biasedRandomWalk() const {
 		return genesis->biasedRandomWalk();
 	}
 
@@ -298,26 +301,25 @@ public:
 		} // End Critical Region
 
 		// Nulify the passed in reference to the node
-		// std::cout << node.use_count() << std::endl;
 		node.reset((TransactionNode*) nullptr);
 	}
 
 	// Function which finds all of the tip nodes in the graph
-	std::vector<TransactionNode::ptr> getTips() {
+	std::vector<TransactionNode::ptr> getTips() const {
 		std::vector<TransactionNode::ptr> out;
 		recursiveGetTips(genesis, out);
 		return out;
 	}
 
 	// Function which prints out the tangle
-	void debugDump(){
+	void debugDump() const {
 		std::cout << "Genesis: " << std::endl;
 		std::list<std::string> foundNodes;
 		genesis->recursiveDebugDump(foundNodes);
 	}
 
-	// Function which queries the balance currenty associated with a given key
-	double queryBalance(const key::PublicKey& account){
+	// Function which queries the balance currently associated with a given key
+	double queryBalance(const key::PublicKey& account) const {
 		std::list<std::string> foundNodes;
 		std::queue<TransactionNode::ptr> q;
 		double balance = 0;
@@ -357,9 +359,11 @@ public:
 
 protected:
 	// Helper function which recursively finds all of the tips in the graph
-	void recursiveGetTips(const TransactionNode::ptr& head, std::vector<TransactionNode::ptr>& tips){
-		// If the node has no children, it is a tip and should be added to the list of tips
-		if(head->children.empty())
+	void recursiveGetTips(const TransactionNode::ptr& head, std::vector<TransactionNode::ptr>& tips) const {
+		// If the node has no children, it is a tip and should be added to the list of tips (if not already in the list of tips)
+		if(head->children.empty() && std::search(tips.begin(), tips.end(), &head, (&head) + 1, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b) {
+			return a->hash == b->hash;
+		}) == tips.end())
 			tips.push_back(head);
 		// Otherwise, recursively consider the node's children
 		else for(const TransactionNode::ptr& child: head->children)
