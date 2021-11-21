@@ -46,6 +46,9 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	// Make cout print numbers up to the million
+	std::cout << std::setprecision(7);
+
 	// Clean up the network connection and handshake thread if we are force shutdown
 	signal(SIGINT, shutdownProcedure);
 
@@ -161,7 +164,7 @@ int main(int argc, char* argv[]) {
 	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
-
+	srand(0);
 
 
 	char cmd;
@@ -171,16 +174,22 @@ int main(int argc, char* argv[]) {
 		case 'c':
 			system("clear");
 			break;
-			
+
 		// Create transaction
 		case 't':
 			{
 				std::vector<Transaction::Input> inputs;
-				inputs.emplace_back(*t.personalKeys, 100.0 + std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count());
+				inputs.emplace_back(*t.personalKeys, 100.0);
 				std::vector<Transaction::Output> outputs;
-				if(!network->peers().empty())
-					outputs.emplace_back(t.peerKeys[network->peers().begin()->second.id()], 100.0);
-				else outputs.emplace_back(t.peerKeys[network->self().id()], 100.0);
+				if(!network->peers().empty()){
+					size_t id = rand() % network->peers().size();
+					auto chosen = network->peers().begin();
+					for(int i = 0; i < id; i++) chosen++;
+
+					outputs.emplace_back(t.peerKeys[chosen->second.id()], 100.0);
+					std::cout << "Sending 100 money to `" << chosen->second.id() << "`" << std::endl;
+				}
+				else outputs.emplace_back(*t.personalKeys, 100.0);
 
 				auto tip1 = t.biasedRandomWalk();
 				auto tip2 = t.biasedRandomWalk();
@@ -211,6 +220,13 @@ int main(int argc, char* argv[]) {
 					trx->debugDump();
 					std::cout << "Confidence: " << (trx->confirmationConfidence() * 100) << "%" << std::endl;
 				}
+			}
+			break;
+
+		// Query our balance
+		case 'b':
+			{
+				std::cout << "Our balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
 			}
 			break;
 		}

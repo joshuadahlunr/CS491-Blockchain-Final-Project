@@ -6,6 +6,7 @@
 #include <mutex>
 #include <algorithm>
 #include <list>
+#include <queue>
 
 #include "transaction.hpp"
 
@@ -91,7 +92,6 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		foundNodes.push_back(hash);
 	}
 
-
 	// -- Consensus Functions
 
 
@@ -154,6 +154,12 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 struct Tangle {
 	// Exception thrown when a node can't be found in the graph
 	struct NodeNotFoundException : public std::runtime_error { NodeNotFoundException(Hash hash) : std::runtime_error("Failed to find node with hash `" + hash + "`") {} };
+	// Exception thrown when an invalid balance is detected
+	struct InvalidBalance : public std::runtime_error {
+		TransactionNode::ptr node;
+		const key::PublicKey& account;
+		InvalidBalance(TransactionNode::ptr node, const key::PublicKey& account, double balance) : std::runtime_error("Node with hash `" + node->hash + "` results in a balance of `" + std::to_string(balance) + "` for an account."), node(node), account(account) {}
+	};
 
 protected:
 	// Pointer to the Genesis block
@@ -218,6 +224,36 @@ public:
 		if(!node->validateTransactionMined())
 			throw std::runtime_error("Transaction with hash `" + node->hash + "` wasn't mined, discarding.");
 
+		// Validate that the inputs to this transaction do not cause their owner's balance to go into the negatives
+		std::vector<std::pair<key::PublicKey, double>> balanceMap; // List acting as a bootleg map of keys to balances
+		for(const Transaction::Input& input: node->inputs){
+			// The account's balance is invalid
+			double balance = -1;
+
+			// If the account's balance is cached... use the cached balance
+			int i = 0;
+			for(auto& [account, bal]: balanceMap){
+				i++;
+				if(account == input.account){
+					balance = bal;
+					break;
+				}
+			}
+			// Otherwise... query its balance
+			if(balance < 0) balance = queryBalance(input.account);
+
+			// Subtace the input from the balance and ensure it doesn't cause the transaction to go into the negatives
+			balance -= input.amount;
+			if(balance < 0)
+				throw InvalidBalance(node, input.account, balance);
+
+			// Cache the balance (adding to the list if not already present)
+			if(i == balanceMap.size())
+				balanceMap.emplace_back(input.account, balance);
+			else balanceMap[i].second = balance;
+		}
+
+
 		// For each parent of the new node... preform error validation
 		for(const TransactionNode::ptr& parent: node->parents) {
 			// Make sure the parent is in the graph
@@ -278,6 +314,45 @@ public:
 		std::cout << "Genesis: " << std::endl;
 		std::list<std::string> foundNodes;
 		genesis->recursiveDebugDump(foundNodes);
+	}
+
+	// Function which queries the balance currenty associated with a given key
+	double queryBalance(const key::PublicKey& account){
+		std::list<std::string> foundNodes;
+		std::queue<TransactionNode::ptr> q;
+		double balance = 0;
+
+		q.push(genesis);
+		TransactionNode::ptr head;
+		while(!q.empty()){
+			head = q.front();
+			q.pop();
+
+			// Don't count the same transaction more than once in the balance
+			if(std::find(foundNodes.begin(), foundNodes.end(), head->hash) != foundNodes.end()) continue;
+
+			// Add up how this transaction takes away from the balance of interest
+			for(const Transaction::Input& input: head->inputs)
+				if(input.account == account)
+					balance -= input.amount;
+
+			// If the balance becomes negative except
+			if(balance < 0)
+				throw InvalidBalance(head, account, balance);
+
+			// Add up how this transaction adds to the balance of interest
+			for(const Transaction::Output& output: head->outputs)
+				if(output.account == account)
+					balance += output.amount;
+
+			// Add the children to the queue
+			for(auto& child: head->children)
+				q.push(child);
+			// Mark ourselves as visited
+			foundNodes.push_back(head->hash);
+		}
+
+		return balance;
 	}
 
 protected:
