@@ -42,8 +42,8 @@ namespace util {
 
 	// Converts the current time to UTC and returns the number of seconds since the epoch.
 	inline std::time_t utc_now() {
-		std::time_t time_now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    	return std::mktime(std::gmtime(&time_now_t));
+		time_t now = std::time(nullptr);
+		return std::mktime(std::gmtime(&now));
 	}
 
 
