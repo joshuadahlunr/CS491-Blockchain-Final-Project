@@ -38,6 +38,10 @@ namespace key {
 	std::vector<Byte> save(const PrivateKey& pri, const PublicKey& pub);
 	inline std::vector<Byte> save(const KeyPair& pair) { return save(pair.pri, pair.pub); }
 
+	// Functions which convert a public key into a hash
+	inline std::string hash(const PublicKey& key) { return util::hash( util::bytes2string(key::save(key)) ); }
+	inline std::string hash(const KeyPair& pair) { return hash(pair.pub); }
+
 	// Functions which convert byte arrays to keys
 	PrivateKey loadPrivate(CryptoPP::VectorSource& source);
 	inline PrivateKey loadPrivate(CryptoPP::VectorSource&& source) { return loadPrivate(source); }

@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
 			std::thread([networkKeys, &t, source = dw.source](){
 				std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-				std::cout << "Sending `" << source.id() << "` a million money!" << std::endl;
+				std::cout << "Sending `" << key::hash(t.peerKeys[source.id()]) << "` a million money!" << std::endl;
 
 				std::vector<Transaction::Input> inputs;
 				inputs.emplace_back(*networkKeys, 1000000);
@@ -164,25 +164,36 @@ int main(int argc, char* argv[]) {
 		// Create transaction
 		case 't':
 			{
-				std::vector<Transaction::Input> inputs;
-				inputs.emplace_back(*t.personalKeys, 100.0);
-				std::vector<Transaction::Output> outputs;
-				if(!network->peers().empty()){
+				// Ask who to send too and how much to send
+				std::string accountHash;
+				double amount;
+				std::cout << "Enter account to transfer to ('r' for random): ";
+				std::cin >> accountHash;
+				std::cout << "Enter amount to transfer: ";
+				std::cin >> amount;
+
+				// If they asked for random choose a random account
+				if(accountHash == "r" && !network->peers().empty()){
 					size_t id = rand() % network->peers().size();
 					auto chosen = network->peers().begin();
 					for(int i = 0; i < id; i++) chosen++;
 
-					outputs.emplace_back(t.peerKeys[chosen->second.id()], 100.0);
-					std::cout << "Sending 100 money to `" << chosen->second.id() << "`" << std::endl;
+					accountHash = key::hash(t.peerKeys[chosen->second.id()]);
 				}
-				else outputs.emplace_back(*t.personalKeys, 100.0);
 
+				// Create transaction inputs and outputs
+				std::vector<Transaction::Input> inputs;
+				inputs.emplace_back(*t.personalKeys, amount);
+				std::vector<Transaction::Output> outputs;
+				outputs.emplace_back(t.findAccount(accountHash), amount);
+
+				// Create, mine, and add the transaction
 				try {
+					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
 					t.add(TransactionNode::createAndMine(t, inputs, outputs));
 				} catch (Tangle::InvalidBalance ib) {
 					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
 				}
-
 			}
 			break;
 
@@ -211,7 +222,7 @@ int main(int argc, char* argv[]) {
 		// Query our balance
 		case 'b':
 			{
-				std::cout << "Our balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
+				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
 			}
 			break;
 		}

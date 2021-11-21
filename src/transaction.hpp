@@ -153,11 +153,11 @@ struct Transaction {
 
 		std::cout << "Inputs: [" << std::endl;
 		for(auto& i: inputs)
-			std::cout << "\t Account: (" << i.account.GetPublicElement().x << ", " << i.account.GetPublicElement().y << "), Amount: " << i.amount << std::endl;
+			std::cout << "\t Account: " << key::hash(i.account) << ", Amount: " << i.amount << std::endl;
 		std::cout << "]" << std::endl
 			<< "Outputs: [" << std::endl;
 		for(auto& o: outputs)
-			std::cout << "\t Account: (" << o.account.GetPublicElement().x << ", " << o.account.GetPublicElement().y << "), Amount: " << o.amount << std::endl;
+			std::cout << "\t Account: " << key::hash(o.account) << ", Amount: " << o.amount << std::endl;
 		std::cout << "]" << std::endl;
 	}
 

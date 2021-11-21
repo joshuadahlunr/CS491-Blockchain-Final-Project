@@ -117,6 +117,15 @@ struct NetworkedTangle: public Tangle {
 		peerKeys[network.self().id()] = personalKeys->pub;
 	}
 
+	// Function which finds a key given its hash
+	const key::PublicKey& findAccount(Hash keyHash) const {
+		for(auto& [uuid, key]: peerKeys)
+			if(key::hash(key) == keyHash)
+				return key;
+
+		throw std::runtime_error("Account not found!");
+	}
+
 	// Adds a new node to the tangle (network synced)
 	Hash add(TransactionNode::ptr node){
 		Hash out = Tangle::add(node);
