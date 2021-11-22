@@ -94,7 +94,7 @@ int main(int argc, char* argv[]) {
 
 	// Generate or load a keypair
 	{
-		std::cout << "Enter your key file (blank to generate new account): ";
+		std::cout << "Enter relative path to your key file (blank to generate new account): ";
 		std::string path;
 		std::getline(std::cin, path);
 
@@ -265,8 +265,95 @@ int main(int argc, char* argv[]) {
 				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
 			}
 			break;
-		}
-	}
+
+		// Save tangle
+		case 's':
+			{
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
+				std::cout << "Enter relative path to save tangle to: ";
+				std::string path;
+				std::getline(std::cin, path);
+
+				std::ofstream fout(path, std::ios::binary);
+				if(!fout){
+					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+					continue;
+				}
+
+				// List all of the transactions in the tangle
+				std::list<Transaction*> transactions = t.listTransactions();
+				// Sort them according to time, ensuring that the genesis remains at the front of the list
+				Transaction* genesis = transactions.front();
+				transactions.sort([genesis](Transaction* a, Transaction* b){
+					if(a->hash == genesis->hash) return true;
+					if(b->hash == genesis->hash) return false;
+					return a->timestamp < b->timestamp;
+				});
+
+				breep::serializer s;
+				s << transactions.size();
+
+				for(Transaction* _t: transactions){
+					const Transaction& t = *_t;
+					s << t;
+				}
+
+				auto raw = s.str();
+				std::string compressed = util::compress(*(std::string*) &raw);
+
+				fout.write(reinterpret_cast<char*>(compressed.data()), compressed.size());
+				fout.close();
+
+				std::cout << "Tangle saved to " << path << std::endl;
+			}
+			break;
+
+		// Load tangle
+		case 'l':
+			{
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
+				std::cout << "Enter relative path to load tangle from: ";
+				std::string path;
+				std::getline(std::cin, path);
+
+				std::ifstream fin(path, std::ios::binary);
+				if(!fin){
+					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+					continue;
+				}
+
+				std::string compressed;
+				fin.seekg(0l, std::ios::end);
+				compressed.resize(fin.tellg());
+				fin.seekg(0l, std::ios::beg);
+				fin.clear();
+				fin.read(&compressed[0], compressed.size());
+				fin.close();
+
+				compressed = util::decompress(compressed);
+				std::basic_string<unsigned char> raw = *(std::basic_string<unsigned char>*) &compressed;
+				breep::deserializer d(raw);
+
+				size_t transactionCount;
+				d >> transactionCount;
+
+				std::cout << "Data loaded from file..." << std::endl;
+
+				// The genesis is always the first transaction in the file
+				Transaction trx;
+				d >> trx;
+				{ NetworkedTangle::TangleSynchronizeRequest r(t); } // Flag us as prepared to recieve a new genesis
+				t.network.send_object_to_self(NetworkedTangle::SyncGenesisRequest(trx, *t.personalKeys));
+
+				// Read in each transaction from the deserializer and then add it to the tangle
+				for(int i = 0; i < transactionCount - 1; i++) { // Minus 1 since we already synced the genesis
+					d >> trx;
+					t.network.send_object_to_self(NetworkedTangle::SynchronizationAddTransactionRequest(trx, *t.personalKeys));
+				}
+
+				std::cout << "Successfully loaded tangle from " << path << std::endl;
+			}
+			break;
 
 		// Key management
 		case 'k':

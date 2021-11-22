@@ -271,7 +271,7 @@ public:
 				return;
 			}
 
-			std::vector<TransactionNode::ptr> parents; // Genesis transactions have no parents
+
 			t.setGenesis(TransactionNode::create(t, networkData.data.genesis));
 
 			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "` from `" << networkData.source.id() << "`" << std::endl;

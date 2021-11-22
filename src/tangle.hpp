@@ -95,6 +95,21 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		foundNodes.push_back(hash);
 	}
 
+	// Function which converts the tangle into a list
+	void recursivelyListTransactions(std::list<Transaction*>& transactions){
+		Transaction* self = this;
+		// We only care about a node if it isn't already in the list
+		if(std::search(transactions.begin(), transactions.end(), &self, (&self) + 1, [](Transaction* a, Transaction* b){
+			return a->hash == b->hash;
+		}) != transactions.end()) return;
+
+		// Add us to the list
+		transactions.push_back(self);
+		// Add our children to the list
+		for(auto& child: children)
+			child->recursivelyListTransactions(transactions);
+	}
+
 	// -- Consensus Functions
 
 
@@ -194,15 +209,14 @@ public:
 		// Mark this old node as the genesis
 		util::makeMutable(genesis->isGenesis) = true;
 
-		// Update the genesis
-		auto oldGenesis = this->genesis;
-		util::makeMutable(this->genesis) = genesis;
-
 		// Free the memory for every child of the old genesis (if it exists)
-		if(oldGenesis)
-			while(!oldGenesis->children.empty())
+		if(this->genesis)
+			while(!this->genesis->children.empty())
 				for(auto& tip: getTips())
 					removeTip(tip);
+
+		// Update the genesis
+		util::makeMutable(this->genesis) = genesis;
 	}
 
 	// Function which finds a node in the graph given its hash
@@ -316,6 +330,14 @@ public:
 		std::cout << "Genesis: " << std::endl;
 		std::list<std::string> foundNodes;
 		genesis->recursiveDebugDump(foundNodes);
+	}
+
+	// Function which lists all of the transactions in the tangle
+	std::list<Transaction*> listTransactions(){
+		std::list<Transaction*> out;
+		genesis->recursivelyListTransactions(out);
+
+		return out;
 	}
 
 	// Function which queries the balance currently associated with a given key
