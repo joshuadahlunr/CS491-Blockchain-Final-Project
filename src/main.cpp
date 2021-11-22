@@ -4,6 +4,7 @@
 #include <vector>
 #include <chrono>
 #include <array>
+#include <fstream>
 #include <signal.h>
 #include <boost/uuid/uuid_io.hpp>
 #include <breep/network/tcp.hpp>
@@ -20,6 +21,27 @@
 bool handshakeThreadShouldRun = true;
 std::unique_ptr<breep::tcp::network> network;
 std::thread handshakeThread;
+
+key::KeyPair loadKeyFile(std::ifstream& fin) {
+	std::string buffer;
+	fin.seekg(0l, std::ios::end);
+	buffer.resize(fin.tellg());
+
+	fin.seekg(0l, std::ios::beg);
+	fin.clear();
+	fin.read( reinterpret_cast<char*>(&buffer[0]), buffer.size() );
+	fin.close();
+
+	key::KeyPair keyPair = key::load(util::string2bytes<key::Byte>(util::decompress(buffer)));
+	keyPair.validate();
+
+	return keyPair;
+}
+
+void saveKeyFile(key::KeyPair& keyPair, std::ofstream& fout){
+	auto buffer = util::compress(util::bytes2string(key::save(keyPair)));
+	fout.write( reinterpret_cast<char*>(buffer.data()), buffer.size() );
+}
 
 // Function which handles cleaning up the program (used for normal termination and gracefully cleaning up when terminated)
 void shutdownProcedure(int signal){
@@ -61,9 +83,6 @@ int main(int argc, char* argv[]) {
 	// Create a network synched tangle
 	NetworkedTangle t(*network);
 
-	// TODO: Need a mechanism for saving generated keys and loading them
-	t.setKeyPair( std::make_shared<key::KeyPair>(key::generateKeyPair(CryptoPP::ASN1::secp160r1())) );
-
 	// Disabling all logs (set to 'warning' by default).
 	network->set_log_level(breep::log_level::none);
 
@@ -72,6 +91,23 @@ int main(int argc, char* argv[]) {
 		std::cout << "Unidentified message received!" << std::endl;
 	});
 
+
+	// Generate or load a keypair
+	{
+		std::cout << "Enter your key file (blank to generate new account): ";
+		std::string path;
+		std::getline(std::cin, path);
+
+		std::ifstream fin(path);
+		if(!fin){
+			t.setKeyPair(std::make_shared<key::KeyPair>( key::generateKeyPair(CryptoPP::ASN1::secp160r1()) ), /*networkSync*/ false);
+			std::cout << "Generated new account" << std::endl;
+		} else {
+			t.setKeyPair(std::make_shared<key::KeyPair>( loadKeyFile(fin) ), /*networkSync*/ false);
+			std::cout << "Loaded account stored in: " << path << std::endl;
+		}
+		fin.close();
+	}
 
 
 	// Establish a network...
@@ -93,13 +129,15 @@ int main(int argc, char* argv[]) {
 			std::thread([networkKeys, &t, source = dw.source](){
 				std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-				std::cout << "Sending `" << key::hash(t.peerKeys[source.id()]) << "` a million money!" << std::endl;
+				if(t.queryBalance(t.peerKeys[source.id()]) == 0){
+					std::cout << "Sending `" << key::hash(t.peerKeys[source.id()]) << "` a million money!" << std::endl;
 
-				std::vector<Transaction::Input> inputs;
-				inputs.emplace_back(*networkKeys, 1000000);
-				std::vector<Transaction::Output> outputs;
-				outputs.emplace_back(t.peerKeys[source.id()], 1000000);
-				t.add(TransactionNode::createAndMine(t, inputs, outputs));
+					std::vector<Transaction::Input> inputs;
+					inputs.emplace_back(*networkKeys, 1000000);
+					std::vector<Transaction::Output> outputs;
+					outputs.emplace_back(t.peerKeys[source.id()], 1000000);
+					t.add(TransactionNode::createAndMine(t, inputs, outputs));
+				}
 			}).detach();
 		});
 
@@ -181,6 +219,8 @@ int main(int argc, char* argv[]) {
 					accountHash = key::hash(t.peerKeys[chosen->second.id()]);
 				}
 
+				std::cout << accountHash << std::endl;
+
 				// Create transaction inputs and outputs
 				std::vector<Transaction::Input> inputs;
 				inputs.emplace_back(*t.personalKeys, amount);
@@ -223,6 +263,53 @@ int main(int argc, char* argv[]) {
 		case 'b':
 			{
 				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
+			}
+			break;
+		}
+	}
+
+		// Key management
+		case 'k':
+			{
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
+				std::cout << "(l)oad, (s)ave, (g)enerate: ";
+				std::string _cmd = "";
+				std::getline(std::cin, _cmd);
+				std::cout << _cmd << std::endl;
+				char cmd = tolower(_cmd[0]);
+
+				std::string path = "";
+				if(cmd == 's' || cmd == 'l'){
+					std::cout << "Relative path: ";
+					std::getline(std::cin, path);
+				}
+
+				if(cmd == 'g'){
+					auto keyPair = std::make_shared<key::KeyPair>( key::generateKeyPair(CryptoPP::ASN1::secp160r1()) );
+					keyPair->validate();
+
+					// Update our key and send it to the rest of the network
+					t.setKeyPair(keyPair);
+				} else if(cmd == 's'){
+					std::ofstream fout(path, std::ios::binary);
+					if(!fout){
+						std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+						continue;
+					}
+
+					saveKeyFile(*t.personalKeys, fout);
+					fout.close();
+				} else {
+					std::ifstream fin(path, std::ios::binary);
+					if(!fin){
+						std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+						continue;
+					}
+
+					// Update our key and send it to the rest of the network
+					t.setKeyPair( std::make_shared<key::KeyPair>(loadKeyFile(fin)) );
+					fin.close();
+				}
 			}
 			break;
 		}

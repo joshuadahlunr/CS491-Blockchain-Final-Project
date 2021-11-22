@@ -356,6 +356,7 @@ public:
 
 		return balance;
 	}
+	double queryBalance(const key::KeyPair& pair) const { return queryBalance(pair.pub); }
 
 protected:
 	// Helper function which recursively finds all of the tips in the graph

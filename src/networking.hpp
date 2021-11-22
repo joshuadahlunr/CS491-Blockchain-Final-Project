@@ -112,9 +112,10 @@ struct NetworkedTangle: public Tangle {
 	}
 
 	// Function which sets the keypair
-	void setKeyPair(const std::shared_ptr<key::KeyPair>& pair){
+	void setKeyPair(const std::shared_ptr<key::KeyPair>& pair, bool networkSync = true){
 		util::makeMutable(personalKeys) = pair;
 		peerKeys[network.self().id()] = personalKeys->pub;
+		if(networkSync) network.send_object(NetworkedTangle::PublicKeySyncResponse(*pair));
 	}
 
 	// Function which finds a key given its hash
