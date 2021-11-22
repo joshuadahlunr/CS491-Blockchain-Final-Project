@@ -46,6 +46,10 @@ namespace util {
     	return std::mktime(std::gmtime(&time_now_t));
 	}
 
+
+	// -- Conversion Functions --
+
+
 	// Function which converts a byte array into a string
 	template<typename Byte>
 	inline std::string bytes2string(std::vector<Byte> bytes){
@@ -62,7 +66,7 @@ namespace util {
 	}
 	// Function which writes a byte array to a standard output stream
 	template<typename Byte>
-	std::ostream& bytes2stream(std::ostream& s, const std::vector<Byte>& bytes){
+	inline std::ostream& bytes2stream(std::ostream& s, const std::vector<Byte>& bytes){
 		size_t size = bytes.size();
 		s.write((char*) &size, sizeof(size));
 		s.write((char*) &bytes[0], bytes.size() * sizeof(Byte));
@@ -70,7 +74,7 @@ namespace util {
 	}
 	// Function which reads a byte array from a standard output stream
 	template<typename Byte>
-	std::istream& stream2bytes(std::istream& s, std::vector<Byte>& bytes){
+	inline std::istream& stream2bytes(std::istream& s, std::vector<Byte>& bytes){
 		size_t size;
 		s.read((char*) &size, sizeof(size));
 		bytes.resize(size);
@@ -81,6 +85,51 @@ namespace util {
 
 	// -- String Extensions --
 
+
+	// Functions which determines which of two base64 strings represent a bigger number
+	inline int base64Compare(std::string a, std::string b){
+		// 1 = A bigger, 0 = equal, -1 = B bigger
+		auto base64CharCompare = [](char a, char b){
+			if( !(isalnum(a) || a == '+' || a == '/') )
+				throw std::runtime_error(std::string("Character `") + a + "` is not a valid base 64 character");
+			if( !(isalnum(b) || b == '+' || b == '/') )
+				throw std::runtime_error(std::string("Character `") + b + "` is not a valid base 64 character");
+
+			if(a == b) return 0;
+
+			if(a == '/') return 1;
+			if(b == '/') return -1;
+
+			if(a == '+') return 1;
+			if(b == '+') return -1;
+
+			if(isdigit(a) && isdigit(b)){
+				if(a > b) return 1;
+				if(b > a) return -1;
+			}
+			if(isdigit(a)) return 1;
+			if(isdigit(b)) return -1;
+
+			if(islower(a) && islower(b)){
+				if(a > b) return 1;
+				if(b > a) return -1;
+			}
+			if(islower(a)) return 1;
+			if(islower(b)) return -1;
+
+			if(a > b) return 1;
+			return -1;
+		};
+
+		if(a.size() > b.size()) return 1;
+		if(b.size() > a.size()) return -1;
+
+		for(int i = 0; i < a.size(); i++)
+			if(int compare = base64CharCompare(a[i], b[i]); compare != 0)
+				return compare;
+
+		return 0;
+	}
 
 	// Replace the first instance of <toFind> in <base> with <toReplace>
 	inline std::string& replace_first_original(std::string& base, const std::string_view& toFind, const std::string_view& toReplace, size_t pos = 0){

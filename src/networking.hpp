@@ -223,7 +223,6 @@ public:
 	};
 
 	// Message which causes the recipent to update their genesis block (only valid if they are accepting of the change)
-	// TODO: Genesis needs to be key validated
 	struct SyncGenesisRequest {
 		Hash validityHash = INVALID_HASH;
 		std::string validitySignature;
@@ -456,7 +455,7 @@ inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle:
 	_d >> compressed;
 	auto uncompressed = util::decompress(*(std::string*) &compressed);
 	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
-	
+
 	std::string validityHash;
 	d >> validityHash;
 	(*(std::string*) &r.validityHash) = validityHash;

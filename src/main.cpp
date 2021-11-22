@@ -83,8 +83,12 @@ int main(int argc, char* argv[]) {
 		outputs.push_back({t.personalKeys->pub, 100.0});
 
 		// If we are the host add a few transactions to the tangle
-		t.add(TransactionNode::create(t.getTips(), inputs, outputs) );
-		t.add(TransactionNode::create(t.getTips(), inputs, outputs) );
+		auto trx = TransactionNode::create(t.getTips(), inputs, outputs);
+		trx->mineTransaction();
+		t.add(trx);
+		trx = TransactionNode::create(t.getTips(), inputs, outputs);
+		trx->mineTransaction();
+		t.add(trx);
 	} else {
 		std::cout << "Attempting to automatically connect to the network..." << std::endl;
 
@@ -132,7 +136,9 @@ int main(int argc, char* argv[]) {
 				std::vector<Transaction::Output> outputs;
 				outputs.push_back({t.peerKeys[network->peers().begin()->second.id()], 100.0});
 
-				t.add(TransactionNode::create(t.getTips(), inputs, outputs));
+				auto trx = TransactionNode::create(t.getTips(), inputs, outputs);
+				trx->mineTransaction();
+				t.add(trx);
 			}
 			break;
 

@@ -10,8 +10,10 @@ TransactionNode::ptr TransactionNode::create(Tangle& t, const Transaction& trx) 
 
 	auto out = create(parents, trx.inputs, trx.outputs);
 	util::makeMutable(out->timestamp) = trx.timestamp;
-	(*(std::string*) &out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overridden
-	util::makeMutable(out->hash) = out->hashTransaction(); // Rehash since the timestamp has been overridden
+	util::makeMutable(out->nonce) = trx.nonce;
+	util::makeMutable(out->miningDifficulty) = trx.miningDifficulty;
+	util::makeMutable(out->miningTarget) = trx.miningTarget;
+	util::makeMutable(out->hash) = out->hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 
 	return out;
 }

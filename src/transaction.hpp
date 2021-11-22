@@ -11,6 +11,8 @@
 
 #include <breep/util/serialization.hpp>
 
+#include "timer.h"
+
 #include "keys.hpp"
 #include "utility.hpp"
 
@@ -30,6 +32,11 @@ struct Transaction {
 	friend breep::deserializer& operator>>(breep::deserializer& d, Transaction& n);
 
 	const int64_t timestamp = 0;
+	const size_t nonce = 0;
+
+	// Variables tracking how much work was needed to mine this particular transaction
+	const uint8_t miningDifficulty = 3; // How many characters at the start of the hash must be the target
+	const char miningTarget = 'A'; // What character the first few characters of the hash must be
 
 	// A transaction output is an account and an amount to assign to that acount
 	struct Output {
@@ -89,7 +96,7 @@ struct Transaction {
 
 	Transaction& operator=(const Transaction& _new){
 		util::makeMutable(timestamp) = _new.timestamp;
-		(*(std::vector<Input>*) &inputs) = _new.inputs;
+		util::makeMutable(nonce) = _new.nonce;
 		util::makeMutable(inputs) = _new.inputs;
 		util::makeMutable(outputs) = _new.outputs;
 
@@ -109,7 +116,7 @@ struct Transaction {
 
 	Transaction& operator=(Transaction&& _new){
 		util::makeMutable(timestamp) = _new.timestamp;
-		(*(std::vector<Input>*) &inputs) = std::move(_new.inputs);
+		util::makeMutable(nonce) = _new.nonce;
 		util::makeMutable(inputs) = std::move(_new.inputs);
 		util::makeMutable(outputs) = std::move(_new.outputs);
 		util::makeMutable(parentHashes) = _new.parentHashes;
@@ -130,7 +137,8 @@ struct Transaction {
 			std::cout << p << ", ";
 		std::cout << " ]" << std::endl;
 
-		std::cout << "Timestamp: " << std::put_time(std::localtime((time_t*) &timestamp), "%c %Z") << std::endl;
+		std::cout << "Timestamp: " << std::put_time(std::localtime((time_t*) &timestamp), "%c %Z") << std::endl
+			<< "Nonce: " << nonce << std::endl;
 
 		std::cout << "Inputs: [" << std::endl;
 		for(auto& i: inputs)
@@ -140,6 +148,26 @@ struct Transaction {
 		for(auto& o: outputs)
 			std::cout << "\t Account: (" << o.account.GetPublicElement().x << ", " << o.account.GetPublicElement().y << "), Amount: " << o.amount << std::endl;
 		std::cout << "]" << std::endl;
+	}
+
+	// Function which checks if the transaction has been mined
+	bool validateTransactionMined() {
+		if(miningDifficulty > hash.size()) return false;
+
+		std::string targetHash(miningDifficulty, miningTarget);
+		targetHash += std::string(hash.size() - miningDifficulty, '/');
+
+		return util::base64Compare(hash, targetHash) <= 0;
+	}
+
+	// Function which mines the transaction
+	void mineTransaction(){
+		std::cout << "Started mining transaction..." << std::endl;
+		Timer t;
+		while( !validateTransactionMined() ){
+			util::makeMutable(nonce)++;
+			util::makeMutable(hash) = hashTransaction();
+		}
 	}
 
 	// Function which checks if the total value coming into a transaction is at least the value coming out of the transaction
@@ -170,6 +198,7 @@ struct Transaction {
 	Hash hashTransaction() const {
 		std::stringstream hash;
 		hash << timestamp;
+		hash << nonce;
 		for(Input input: inputs)
 			hash << input.hashContribution();
 		for(Output output: outputs)
@@ -189,6 +218,10 @@ inline breep::serializer& operator<<(breep::serializer& s, const Transaction& t)
 		s << h;
 
 	s << t.timestamp;
+	s << t.nonce;
+	s << t.miningDifficulty;
+	s << t.miningTarget;
+
 	s << t.inputs.size();
 	for(const Transaction::Input& input: t.inputs){
 		s << input.account;
@@ -208,6 +241,9 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 	size_t parentHashesSize;
 	std::vector<std::string> parentHashes;
 	int64_t timestamp;
+	size_t nonce;
+	uint8_t miningDifficulty;
+	char miningTarget;
 	size_t inputsSize;
 	std::vector<Transaction::Input> inputs;
 	size_t outputsSize;
@@ -220,6 +256,10 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 		d >> parentHashes[i];
 
 	d >> timestamp;
+	d >> nonce;
+	d >> miningDifficulty;
+	d >> miningTarget;
+
 	d >> inputsSize;
 	inputs.resize(inputsSize);
 	for(int i = 0; i < inputsSize; i++){
@@ -236,8 +276,11 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 	}
 
 	t = Transaction(parentHashes, inputs, outputs);
+	// Update several variables behind the scenes
 	util::makeMutable(t.timestamp) = timestamp;
-	(*(std::string*) &t.hash) = t.hashTransaction(); // Rehash since the timestamp has been overridden
+	util::makeMutable(t.nonce) = nonce;
+	util::makeMutable(t.miningDifficulty) = miningDifficulty;
+	util::makeMutable(t.miningTarget) = miningTarget;
 	util::makeMutable(t.hash) = t.hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 	return d;
 }

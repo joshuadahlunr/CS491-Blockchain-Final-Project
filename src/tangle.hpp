@@ -106,6 +106,9 @@ struct Tangle {
 		// Ensure that the inputs are greater than or equal to the outputs
 		if(!node->validateTransactionTotals())
 			throw std::runtime_error("Transaction with hash `" + node->hash + "` tried to generate something from nothing, discarding.");
+		// Ensure that the inputs are greater than or equal to the outputs
+		if(!node->validateTransactionMined())
+			throw std::runtime_error("Transaction with hash `" + node->hash + "` wasn't mined, discarding.");
 
 		// For each parent of the new node... preform error validation
 		for(const TransactionNode::ptr& parent: node->parents) {
