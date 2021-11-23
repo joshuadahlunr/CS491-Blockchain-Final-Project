@@ -191,6 +191,7 @@ int main(int argc, char* argv[]) {
 	srand(0);
 
 
+	breep::listener_id pingingID = 0;
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
 		switch(cmd){
@@ -354,6 +355,54 @@ int main(int argc, char* argv[]) {
 					// Update our key and send it to the rest of the network
 					t.setKeyPair( std::make_shared<key::KeyPair>(loadKeyFile(fin)) );
 					fin.close();
+				}
+			}
+			break;
+
+		// Toggle pinging transactions
+		case 'p':
+			{
+				if(pingingID){
+					if(network->remove_data_listener<NetworkedTangle::AddTransactionRequest>(pingingID)){
+						pingingID = 0;
+						std::cout << "Stopped pinging transactions" << std::endl;
+					}
+				} else {
+					pingingID = network->add_data_listener<NetworkedTangle::AddTransactionRequest>([&t] (breep::tcp::netdata_wrapper<NetworkedTangle::AddTransactionRequest>& dw) -> void {
+						double recieved = 0;
+						for(const Transaction::Output& output: dw.data.transaction.outputs)
+							recieved += output.amount;
+
+						std::thread([&t, recieved, hash = dw.data.transaction.hash](){
+							std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+							// Check that the transaction was approved
+							if(t.find(hash) && network->peers().size()){
+								size_t id = rand() % network->peers().size();
+								auto chosen = network->peers().begin();
+								for(int i = 0; i < id; i++) chosen++;
+
+								try{
+									// Create transaction inputs and outputs
+									std::vector<Transaction::Input> inputs;
+									inputs.emplace_back(*t.personalKeys, recieved);
+									std::vector<Transaction::Output> outputs;
+									outputs.emplace_back(t.peerKeys[chosen->second.id()], recieved);
+
+									// Create, mine, and add the transaction
+									std::cout << "Sending " << recieved << " money to " << key::hash(t.peerKeys[chosen->second.id()]) << std::endl;
+									t.add(TransactionNode::createAndMine(t, inputs, outputs));
+								} catch (Tangle::InvalidBalance ib) {
+									std::cerr << ib.what() << " Discarding transaction!" << std::endl;
+								} catch (NetworkedTangle::InvalidAccount ia) {
+									std::cerr << ia.what() << " Discarding transaction!" << std::endl;
+								}
+							}
+						}).detach();
+					}).id();
+
+					if(pingingID)
+						std::cout << "Started pinging transactions" << std::endl;
 				}
 			}
 			break;
