@@ -281,28 +281,7 @@ int main(int argc, char* argv[]) {
 					continue;
 				}
 
-				// List all of the transactions in the tangle
-				std::list<Transaction*> transactions = t.listTransactions();
-				// Sort them according to time, ensuring that the genesis remains at the front of the list
-				Transaction* genesis = transactions.front();
-				transactions.sort([genesis](Transaction* a, Transaction* b){
-					if(a->hash == genesis->hash) return true;
-					if(b->hash == genesis->hash) return false;
-					return a->timestamp < b->timestamp;
-				});
-
-				breep::serializer s;
-				s << transactions.size();
-
-				for(Transaction* _t: transactions){
-					const Transaction& t = *_t;
-					s << t;
-				}
-
-				auto raw = s.str();
-				std::string compressed = util::compress(*(std::string*) &raw);
-
-				fout.write(reinterpret_cast<char*>(compressed.data()), compressed.size());
+				t.saveTangle(fout);
 				fout.close();
 
 				std::cout << "Tangle saved to " << path << std::endl;
@@ -323,34 +302,12 @@ int main(int argc, char* argv[]) {
 					continue;
 				}
 
-				std::string compressed;
 				fin.seekg(0l, std::ios::end);
-				compressed.resize(fin.tellg());
+				size_t size = fin.tellg();
 				fin.seekg(0l, std::ios::beg);
 				fin.clear();
-				fin.read(&compressed[0], compressed.size());
+				t.loadTangle(fin, size);
 				fin.close();
-
-				compressed = util::decompress(compressed);
-				std::basic_string<unsigned char> raw = *(std::basic_string<unsigned char>*) &compressed;
-				breep::deserializer d(raw);
-
-				size_t transactionCount;
-				d >> transactionCount;
-
-				std::cout << "Data loaded from file..." << std::endl;
-
-				// The genesis is always the first transaction in the file
-				Transaction trx;
-				d >> trx;
-				{ NetworkedTangle::TangleSynchronizeRequest r(t); } // Flag us as prepared to recieve a new genesis
-				t.network.send_object_to_self(NetworkedTangle::SyncGenesisRequest(trx, *t.personalKeys));
-
-				// Read in each transaction from the deserializer and then add it to the tangle
-				for(int i = 0; i < transactionCount - 1; i++) { // Minus 1 since we already synced the genesis
-					d >> trx;
-					t.network.send_object_to_self(NetworkedTangle::SynchronizationAddTransactionRequest(trx, *t.personalKeys));
-				}
 
 				std::cout << "Successfully loaded tangle from " << path << std::endl;
 			}

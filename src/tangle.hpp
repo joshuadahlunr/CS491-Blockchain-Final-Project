@@ -325,21 +325,6 @@ public:
 		return out;
 	}
 
-	// Function which prints out the tangle
-	void debugDump() const {
-		std::cout << "Genesis: " << std::endl;
-		std::list<std::string> foundNodes;
-		genesis->recursiveDebugDump(foundNodes);
-	}
-
-	// Function which lists all of the transactions in the tangle
-	std::list<Transaction*> listTransactions(){
-		std::list<Transaction*> out;
-		genesis->recursivelyListTransactions(out);
-
-		return out;
-	}
-
 	// Function which queries the balance currently associated with a given key
 	double queryBalance(const key::PublicKey& account) const {
 		std::list<std::string> foundNodes;
@@ -379,6 +364,22 @@ public:
 		return balance;
 	}
 	double queryBalance(const key::KeyPair& pair) const { return queryBalance(pair.pub); }
+
+	// Function which prints out the tangle
+	void debugDump() const {
+		std::cout << "Genesis: " << std::endl;
+		std::list<std::string> foundNodes;
+		genesis->recursiveDebugDump(foundNodes);
+	}
+
+	// Function which lists all of the transactions in the tangle
+	std::list<Transaction*> listTransactions(){
+		std::list<Transaction*> out;
+		genesis->recursivelyListTransactions(out);
+
+		return out;
+	}
+
 
 protected:
 	// Helper function which recursively finds all of the tips in the graph

@@ -5,6 +5,8 @@
 #include "keys.hpp"
 #include <map>
 #include <list>
+#include <ostream>
+#include <istream>
 
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <boost/uuid/uuid_io.hpp>
@@ -134,6 +136,58 @@ struct NetworkedTangle: public Tangle {
 		Hash out = Tangle::add(node);
 		network.send_object(AddTransactionRequest(*node, *personalKeys)); // The add gets validated by the base tangle, if we get to this code (no exception) then the node is acceptable
 		return out;
+	}
+
+	// Function which allows saving a tangle to a file
+	void saveTangle(std::ostream& out) {
+		// List all of the transactions in the tangle
+		std::list<Transaction*> transactions = listTransactions();
+		// Sort them according to time, ensuring that the genesis remains at the front of the list
+		Transaction* genesis = transactions.front();
+		transactions.sort([genesis](Transaction* a, Transaction* b){
+			if(a->hash == genesis->hash) return true;
+			if(b->hash == genesis->hash) return false;
+			return a->timestamp < b->timestamp;
+		});
+
+		breep::serializer s;
+		s << transactions.size();
+
+		for(Transaction* _t: transactions){
+			const Transaction& t = *_t;
+			s << t;
+		}
+
+		auto raw = s.str();
+		std::string compressed = util::compress(*(std::string*) &raw);
+
+		out.write(reinterpret_cast<char*>(compressed.data()), compressed.size());
+	}
+
+	// Function which allows loading a tangle from a file
+	void loadTangle(std::istream& in, size_t size) {
+		std::string compressed;
+		compressed.resize(size);
+		in.read(&compressed[0], compressed.size());
+
+		compressed = util::decompress(compressed);
+		std::basic_string<unsigned char> raw = *(std::basic_string<unsigned char>*) &compressed;
+		breep::deserializer d(raw);
+
+		size_t transactionCount;
+		d >> transactionCount;
+
+		// The genesis is always the first transaction in the file
+		Transaction trx;
+		d >> trx;
+		listeningForGenesisSync = true; // Flag us as prepared to recieve a new genesis
+		network.send_object_to_self(SyncGenesisRequest(trx, *personalKeys));
+
+		// Read in each transaction from the deserializer and then add it to the tangle
+		for(int i = 0; i < transactionCount - 1; i++) { // Minus 1 since we already synced the genesis
+			d >> trx;
+			network.send_object_to_self(SynchronizationAddTransactionRequest(trx, *personalKeys));
+		}
 	}
 
 private:
