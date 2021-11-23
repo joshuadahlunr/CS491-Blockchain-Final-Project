@@ -166,15 +166,19 @@ int main(int argc, char* argv[]) {
 			return 2;
 		}
 
-		// Send our public key to the rest of the network
-		network->send_object(NetworkedTangle::PublicKeySyncRequest());
-		// Wait half a second
-		std::this_thread::sleep_for(std::chrono::milliseconds(500)); // TODO: Make this delay unessicary
+		std::thread([&t, localPort](){
+			// Wait half a second
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			// Send our public key to the rest of the network
+			network->send_object(NetworkedTangle::PublicKeySyncRequest());
 
-		std::cout << "Connected to the network (listening on port " << localPort << ")" << std::endl;
+			// Wait half a second
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			std::cout << "Connected to the network (listening on port " << localPort << ")" << std::endl;
 
-		// If we are a client... ask the network for the tangle
-		network->send_object(NetworkedTangle::TangleSynchronizeRequest(t)); // TODO: Only force us to sync keys with people we actually communicate with
+			// If we are a client... ask the network for the tangle
+			network->send_object(NetworkedTangle::TangleSynchronizeRequest(t));
+		}).detach();
 	}
 
 
@@ -407,6 +411,8 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		}
+
+		std::cin.clear();
 	}
 
 	// Clean up

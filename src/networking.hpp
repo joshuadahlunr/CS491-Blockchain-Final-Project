@@ -180,7 +180,7 @@ struct NetworkedTangle: public Tangle {
 		// The genesis is always the first transaction in the file
 		Transaction trx;
 		d >> trx;
-		listeningForGenesisSync = true; // Flag us as prepared to recieve a new genesis
+		listeningForGenesisSync = true; // Flag us as prepared to receive a new genesis
 		network.send_object_to_self(SyncGenesisRequest(trx, *personalKeys));
 
 		// Read in each transaction from the deserializer and then add it to the tangle
@@ -251,14 +251,21 @@ public:
 
 	// Message which requests the public key to be sent
 	struct PublicKeySyncRequest {
+		// Track the person we last sent a key too
+		static boost::uuids::uuid lastSent;
+
 		static void listener(breep::tcp::netdata_wrapper<PublicKeySyncRequest>& networkData, NetworkedTangle& t){
 			if(!t.personalKeys)
 				throw key::InvalidKey("Missing Personal Keypair!");
 			if(!t.personalKeys->validate())
 				throw key::InvalidKey("Personal Keypair's public and private key were not created from eachother!");
 
-			t.network.send_object_to(networkData.source, PublicKeySyncResponse(*t.personalKeys));
-			std::cout << "Sent public key to `" << networkData.source.id() << "`" << std::endl;
+			// Don't service this request if we just sent this person our key
+			if(lastSent != networkData.source.id()){
+				t.network.send_object_to(networkData.source, PublicKeySyncResponse(*t.personalKeys));
+				std::cout << "Sent public key to `" << networkData.source.id() << "`" << std::endl;
+			}
+			lastSent = networkData.source.id();
 
 			// If we don't have keys for this peer, request them
 			if(!t.peerKeys.contains(networkData.source.id()))
@@ -367,45 +374,47 @@ public:
 
 	protected:
 		static void attemptToAddTransaction(const Transaction& transaction, HashVerificationPair validityPair, NetworkedTangle& t){
-			// If we don't have the peer's public key, request it and enqueue the transaction for later
-			if(!t.peerKeys.contains(validityPair.peerID)){
-				auto& peers = t.network.peers();
-				auto& sender = peers.at(validityPair.peerID);
-				t.network.send_object_to(sender, PublicKeySyncRequest());
-				t.networkQueue.emplace_back();
-				t.networkQueue.back().transaction = transaction;
-				t.networkQueue.back().pair = validityPair;
-
-				std::cout << "Received transaction add from unverified peer `" << validityPair.peerID << "`, enquing transaction with hash `" << transaction.hash << "` and requesting peer's key." << std::endl;
-				return;
-			}
-
-			// If we can't verify the transaction discard it
-			if(!key::verifyMessage(t.peerKeys[validityPair.peerID], transaction.hash, validityPair.signature)){
-				std::cerr << "Transaction with hash `" + transaction.hash + "` sender's identity failed to be verified, discarding." << std::endl;
-				return;
-			}
-
-			bool parentsFound = true;
-			std::vector<TransactionNode::ptr> parents;
-			for(Hash& hash: transaction.parentHashes){
-				auto parent = t.find(hash);
-				if(parent)
-					parents.push_back(parent);
-				else {
+			try {
+				// If we don't have the peer's public key, request it and enqueue the transaction for later
+				if(!t.peerKeys.contains(validityPair.peerID)){
+					auto& peers = t.network.peers();
+					auto& sender = peers.at(validityPair.peerID);
+					t.network.send_object_to(sender, PublicKeySyncRequest());
 					t.networkQueue.emplace_back();
 					t.networkQueue.back().transaction = transaction;
 					t.networkQueue.back().pair = validityPair;
-					parentsFound = false;
-					std::cout << "Remote transaction with hash `" + transaction.hash + "` is temporarily orphaned... enqueuing for later" << std::endl;
-					break;
-				}
-			}
 
-			if(parentsFound) {
-				(*(Tangle*) &t).add(TransactionNode::create(t, transaction)); // Call the tangle version so that we don't spam the network with extra messages
-				std::cout << "Added remote transaction with hash `" + transaction.hash + "` to the tangle" << std::endl;
-			}
+					std::cout << "Received transaction add from unverified peer `" << validityPair.peerID << "`, enquing transaction with hash `" << transaction.hash << "` and requesting peer's key." << std::endl;
+					return;
+				}
+
+				// If we can't verify the transaction discard it
+				if(!key::verifyMessage(t.peerKeys[validityPair.peerID], transaction.hash, validityPair.signature)){
+					std::cerr << "Transaction with hash `" + transaction.hash + "` sender's identity failed to be verified, discarding." << std::endl;
+					return;
+				}
+
+				bool parentsFound = true;
+				std::vector<TransactionNode::ptr> parents;
+				for(Hash& hash: transaction.parentHashes){
+					auto parent = t.find(hash);
+					if(parent)
+						parents.push_back(parent);
+					else {
+						t.networkQueue.emplace_back();
+						t.networkQueue.back().transaction = transaction;
+						t.networkQueue.back().pair = validityPair;
+						parentsFound = false;
+						std::cout << "Remote transaction with hash `" + transaction.hash + "` is temporarily orphaned... enqueuing for later" << std::endl;
+						break;
+					}
+				}
+
+				if(parentsFound) {
+					(*(Tangle*) &t).add(TransactionNode::create(t, transaction)); // Call the tangle version so that we don't spam the network with extra messages
+					std::cout << "Added remote transaction with hash `" + transaction.hash + "` to the tangle" << std::endl;
+				}
+			} catch (...) { std::cerr << "Invalid transaction in network queue, discarding" << std::endl; }
 		}
 	};
 

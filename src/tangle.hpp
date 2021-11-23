@@ -84,7 +84,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Only print out information about a node if it hasn't already been printed
 		if(std::find(foundNodes.begin(), foundNodes.end(), hash) != foundNodes.end()) return;
 
-		std::cout << std::string(depth, ' ') << hash << " children: [ ";
+		std::cout << std::left << std::setw(5) << depth << std::string(depth + 1, ' ') << hash << " children: [ ";
 		for(const TransactionNode::ptr& child: children)
 			std::cout << child->hash << ", ";
 		std::cout << "]" << std::endl;

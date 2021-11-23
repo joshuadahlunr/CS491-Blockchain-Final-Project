@@ -61,14 +61,18 @@ unsigned short handshake::determineRemotePort(boost::asio::io_service& io_servic
 	while(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() < 10000) // Try to connect for 10 seconds
 		try{
 			// Ping for a handshake
+			boost::system::error_code ec;
 			boost::asio::ip::tcp::socket sock(io_service);
-			sock.connect(boost::asio::ip::tcp::endpoint(address, handshakePort++));
+			sock.connect(boost::asio::ip::tcp::endpoint(address, handshakePort++), ec);
+			if(ec) throw boost::system::system_error(ec);
 			std::string data = "REMOTE PORT";
-			sock.write_some(boost::asio::buffer(data, data.size()));
+			sock.write_some(boost::asio::buffer(data, data.size()), ec);
+			if(ec) throw boost::system::system_error(ec);
 
 			// Wait 500ms for a response
 			if(readWithTimeout(io_service, sock, boost::asio::buffer(reinterpret_cast<char*>(&hs), sizeof(hs)), std::chrono::milliseconds(500))){ // TODO: is 500ms too short of a time frame?
-				sock.close();
+				sock.close(ec);
+				if(ec) throw boost::system::system_error(ec);
 
 				// Quick validation of the returned data
 				if(hs.H == 'H' && hs.A == 'A' && hs.N == 'N' && hs.D == 'D' && hs.S == 'S' && hs.K == 'K' && hs.E == 'E'){
@@ -79,9 +83,13 @@ unsigned short handshake::determineRemotePort(boost::asio::io_service& io_servic
 			}
 
 			// Make sure we close the socket before we open a new one
-			sock.close();
+			sock.close(ec);
+			if(ec) throw boost::system::system_error(ec);
 
-		} catch(...) {}
+		} catch(boost::system::system_error&) {
+			// On ASIO exception try the handshake port again
+			handshakePort--;
+		} catch(...) { }
 
 	// If we couldn't connect in 5 seconds
 	std::cout << "We were unable to automatically detect a network on `" << address.to_string() << "`" << std::endl << " please provide a port manually: ";
@@ -89,3 +97,6 @@ unsigned short handshake::determineRemotePort(boost::asio::io_service& io_servic
 
 	return remotePort;
 }
+
+// Storage for the ID of the last key receiver
+boost::uuids::uuid NetworkedTangle::PublicKeySyncRequest::lastSent;
