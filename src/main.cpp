@@ -217,22 +217,23 @@ int main(int argc, char* argv[]) {
 					for(int i = 0; i < id; i++) chosen++;
 
 					accountHash = key::hash(t.peerKeys[chosen->second.id()]);
-				}
+				} else if(accountHash == "r")
+					accountHash = key::hash(t.personalKeys->pub);
 
-				std::cout << accountHash << std::endl;
+				try{
+					// Create transaction inputs and outputs
+					std::vector<Transaction::Input> inputs;
+					inputs.emplace_back(*t.personalKeys, amount);
+					std::vector<Transaction::Output> outputs;
+					outputs.emplace_back(t.findAccount(accountHash), amount);
 
-				// Create transaction inputs and outputs
-				std::vector<Transaction::Input> inputs;
-				inputs.emplace_back(*t.personalKeys, amount);
-				std::vector<Transaction::Output> outputs;
-				outputs.emplace_back(t.findAccount(accountHash), amount);
-
-				// Create, mine, and add the transaction
-				try {
+					// Create, mine, and add the transaction
 					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
 					t.add(TransactionNode::createAndMine(t, inputs, outputs));
 				} catch (Tangle::InvalidBalance ib) {
 					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
+				} catch (NetworkedTangle::InvalidAccount ia) {
+					std::cerr << ia.what() << " Discarding transaction!" << std::endl;
 				}
 			}
 			break;

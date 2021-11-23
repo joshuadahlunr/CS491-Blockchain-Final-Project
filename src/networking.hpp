@@ -71,6 +71,8 @@ namespace handshake {
 
 // Class which provides a network synchronization for a tangle
 struct NetworkedTangle: public Tangle {
+	struct InvalidAccount : public std::runtime_error { Hash account; InvalidAccount(Hash account): std::runtime_error("Account `" + account + "` not found!"), account(account) {} };
+
 	breep::tcp::network& network;
 
 	// This account's public and private keypair
@@ -124,7 +126,7 @@ struct NetworkedTangle: public Tangle {
 			if(key::hash(key) == keyHash)
 				return key;
 
-		throw std::runtime_error("Account not found!");
+		throw InvalidAccount(keyHash);
 	}
 
 	// Adds a new node to the tangle (network synced)
