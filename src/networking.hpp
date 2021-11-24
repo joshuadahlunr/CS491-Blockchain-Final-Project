@@ -141,7 +141,7 @@ struct NetworkedTangle: public Tangle {
 	// Function which allows saving a tangle to a file
 	void saveTangle(std::ostream& out) {
 		// List all of the transactions in the tangle
-		std::list<Transaction*> transactions = listTransactions();
+		std::list<TransactionNode*> transactions = listTransactions();
 		// Sort them according to time, ensuring that the genesis remains at the front of the list
 		Transaction* genesis = transactions.front();
 		transactions.sort([genesis](Transaction* a, Transaction* b){
@@ -290,8 +290,8 @@ public:
 			if(node->hash == t.genesis->hash) t.network.send_object_to(requester, SyncGenesisRequest(*node, *t.personalKeys));
 			else t.network.send_object_to(requester, SynchronizationAddTransactionRequest(*node, *t.personalKeys));
 
-			for(auto& child: node->children)
-				recursiveSendTangle(requester, t, child);
+			for(int i = 0; i < node->children.read_lock()->size(); i++)
+				recursiveSendTangle(requester, t, node->children.read_lock()[i]);
 		}
 	};
 

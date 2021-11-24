@@ -8,6 +8,8 @@
 #include <list>
 #include <queue>
 
+#include "monitor.hpp"
+
 #include "transaction.hpp"
 
 struct Tangle;
@@ -22,7 +24,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// Immutable list of parents of the node
 	const std::vector<TransactionNode::ptr> parents;
 	// List of children of the node
-	std::vector<TransactionNode::ptr> children;
+	monitor<std::vector<TransactionNode::ptr>> children;
+
 
 	TransactionNode(const std::vector<TransactionNode::ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) :
 		// Construct the base transaction with the hashes of the parent nodes
@@ -52,15 +55,22 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 			if(parents.empty())
 				return shared_from_this();
 			// Otherwise... find the pointer to ourselves in the first parent's list of child pointers
-			else for(const TransactionNode::ptr& parentsChild: parents[0]->children)
-				if(parentsChild->hash == hash)
-					return parentsChild;
+			else
+				for(size_t i = 0; i < parents[0]->children.read_lock()->size(); i++){
+					auto lock = parents[0]->children.read_lock();
+					const TransactionNode::ptr& parentsChild = parents[0]->children.unsafe()[i];
+					if(parentsChild->hash == hash)
+						return parentsChild;
+				}
 		}
 
 		// If our hash doesn't match check each child to see if it or its children contains the searched for hash
-		for(const TransactionNode::ptr& child: children)
+		for(size_t i = 0; i < children.read_lock()->size(); i++){
+			auto lock = children.read_lock();
+			const TransactionNode::ptr& child = children.unsafe()[i];
 			if(auto recursiveResult = child->recursiveFind(hash); recursiveResult != nullptr)
 				return recursiveResult;
+		}
 
 		// If the hash doesn't exist in the children return a nullptr
 		return nullptr;
@@ -69,7 +79,9 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// Function which recursively determines if the target is a child
 	bool isChild(TransactionNode::ptr& target) const {
 		bool found = false;
-		for(auto& child: children){
+		for(size_t i = 0; i < children.read_lock()->size(); i++){
+			auto lock = children.read_lock();
+			auto& child = children.unsafe()[i];
 			// If this child is the target then it is a child of this node
 			if(child->hash == target->hash)
 				return true;
@@ -86,20 +98,23 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		if(std::find(foundNodes.begin(), foundNodes.end(), hash) != foundNodes.end()) return;
 
 		std::cout << std::left << std::setw(5) << depth << std::string(depth + 1, ' ') << hash << " children: [ ";
-		for(const TransactionNode::ptr& child: children)
-			std::cout << child->hash << ", ";
+		{
+			auto lock = children.read_lock();
+			for(size_t i = 0; i < children.unsafe().size(); i++)
+				std::cout << children.unsafe()[i]->hash << ", ";
+		}
 		std::cout << "]" << std::endl;
 
-		for(const TransactionNode::ptr& child: children)
-			child->recursiveDebugDump(foundNodes, depth + 1);
+		for(size_t i = 0; i < children.unsafe().size(); i++)
+			children.unsafe()[i]->recursiveDebugDump(foundNodes, depth + 1);
 
 		foundNodes.push_back(hash);
 	}
 
 	// Function which converts the tangle into a list
-	void recursivelyListTransactions(std::list<Transaction*>& transactions){
+	void recursivelyListTransactions(std::list<TransactionNode*>& transactions){
 		// We only care about a node if it isn't already in the list
-		if(util::contains(transactions.begin(), transactions.end(), this, [](Transaction* a, Transaction* b){
+		if(util::contains(transactions.begin(), transactions.end(), this, [](TransactionNode* a, TransactionNode* b){
 			if(!a || !b) return false;
 			return a->hash == b->hash;
 		})) return;
@@ -107,8 +122,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Add us to the list
 		transactions.push_back(this);
 		// Add our children to the list
-		for(auto& child: children)
-			child->recursivelyListTransactions(transactions);
+		for(size_t i = 0; i < children.read_lock()->size(); i++)
+			children.read_lock()[i]->recursivelyListTransactions(transactions);
 	}
 
 	// -- Consensus Functions
@@ -129,15 +144,61 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which recursively calculates the weight of a transaction
+	// float cumulativeWeight() const {
+	// 	// Tips just have their own weight
+	// 	if(children.empty())
+	// 		return ownWeight();
+	//
+	// 	float sum = ownWeight();
+	// 	for(const TransactionNode::ptr& child: children)
+	// 		if(child)
+	// 			sum += child->cumulativeWeight();
+	//
+	// 	return sum;
+	// }
+	// Function which recursively calculates the weight of a transaction
+	// float cumulativeWeight(std::list<TransactionNode::ptr>& considered) const {
+	// 	// Tips just have their own weight
+	// 	if(children.empty())
+	// 		return ownWeight();
+	//
+	// 	float sum = ownWeight();
+	// 	for(const TransactionNode::ptr& child: children)
+	// 		if(child)
+	// 			if(!util::contains(considered.begin(), considered.end(), child, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b){
+	// 				if(!a || !b) return false;
+	// 				return a->hash == b->hash;
+	// 			})){
+	// 				sum += child->cumulativeWeight(considered);
+	// 				considered.push_back(child);
+	// 			}
+	//
+	// 	return sum;
+	// }
+	// float cumulativeWeight() const {
+	// 	std::list<TransactionNode::ptr> considered;
+	// 	return cumulativeWeight(considered);
+	// }
 	float cumulativeWeight() const {
-		// Tips just have their own weight
-		if(children.empty())
-			return ownWeight();
+		std::queue<TransactionNode::ptr> q;
+		for(size_t i = 0; i < children.read_lock()->size(); i++) q.push(children.read_lock()[i]);
+		std::list<TransactionNode::ptr> considered;
 
 		float sum = ownWeight();
-		for(const TransactionNode::ptr& child: children)
-			if(child)
-				sum += child->cumulativeWeight();
+		while(!q.empty()){
+			auto head = q.front();
+			q.pop();
+			if(!head) continue;
+			if(util::contains(considered.begin(), considered.end(), head, [](TransactionNode::ptr a, TransactionNode::ptr b){
+				if(!a || !b) return false;
+				return a->hash == b->hash;
+			})) continue;
+
+			if(head) sum += head->ownWeight();
+
+			for(size_t i = 0; i < head->children.read_lock()->size(); i++)
+				q.push(head->children.read_lock()[i]);
+		}
 
 		return sum;
 	}
@@ -147,30 +208,31 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		if(isGenesis) return 0;
 
 		size_t max = 0;
-		for(const TransactionNode::ptr& parent: parents)
-			max = std::max(parent->height(), max);
+		for(size_t i = 0; i < parents.size(); i++)
+			max = std::max(parents[i]->height(), max);
 
 		return max + 1;
 	}
 
 	// Function which calculates the depth (longest path to tip) of the transaction
 	size_t depth() const {
-		if(children.empty()) return 0;
+		if(children.read_lock()->empty()) return 0;
 
 		size_t max = 0;
-		for(const TransactionNode::ptr& child: children)
-			max = std::max(child->depth(), max);
+		for(size_t i = 0; i < children.read_lock()->size(); i++)
+			max = std::max(children.read_lock()[i]->depth(), max);
 
 		return max + 1;
 	}
 
 	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
 	TransactionNode::ptr biasedRandomWalk(double alpha = 5, double stepBackProb = 1/10.0) {
+		Timer t;
 		// Seed random number generator
 		CryptoPP::AutoSeededRandomPool rng;
 
 		// If we are a tip, get the shared pointer referencing us
-		if(children.empty())
+		if(children.read_lock()->empty())
 			return shared_from_this();
 
 		// // Have a small probability of stepping back towards the parents
@@ -182,8 +244,9 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		std::list<std::pair<TransactionNode*, double>> weightedList;
 		size_t ourWeight = cumulativeWeight();
 		double totalWeight = 0;
-		for(TransactionNode::ptr& child: children){
-			double weight = std::exp( -alpha * (ourWeight - child->cumulativeWeight()) );
+		for(size_t i = 0; i < children.read_lock()->size(); i++){
+			TransactionNode::ptr& child = children.read_lock()[i];
+			double weight = std::max( std::exp(-alpha * (ourWeight - child->cumulativeWeight())), std::numeric_limits<double>::min() );
 			weightedList.emplace_back(child.get(), weight);
 			totalWeight += weight;
 		}
@@ -209,8 +272,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		std::list<TransactionNode::ptr> out;
 		// Add the children and this to the queue (the children will hopefully let us get a larger set of nodes to walk from)
 		std::queue<TransactionNode::ptr> q;
-		for(auto& child: children)
-			q.push(child);
+		for(size_t i = 0; i < children.read_lock()->size(); i++)
+			q.push(children.read_lock()[i]);
 		q.push(shared_from_this());
 
 		// Cache our depth
@@ -237,8 +300,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 				return { head };
 
 			// Otherwise search through the head's parents
-			else for(auto& parent: head->parents)
-				q.push(parent);
+			else for(size_t i = 0; i < parents.size(); i++)
+				q.push(parents[i]);
 		}
 
 		return out;
@@ -297,7 +360,7 @@ public:
 	// Clean up the graph, in memory, on exit
 	~Tangle() {
 		// Repeatedly remove tips until the genesis node is the only node left in the graph
-		while(!genesis->children.empty())
+		while(!genesis->children.read_lock()->empty())
 			for(auto tip: getTips())
 				removeTip(tip);
 	}
@@ -309,7 +372,7 @@ public:
 
 		// Free the memory for every child of the old genesis (if it exists)
 		if(this->genesis)
-			while(!this->genesis->children.empty())
+			while(!this->genesis->children.read_lock()->empty())
 				for(auto& tip: getTips())
 					removeTip(tip);
 
@@ -376,8 +439,8 @@ public:
 				throw NodeNotFoundException(parent->hash);
 
 			// Make sure the node isn't already a child of the parent
-			for(const TransactionNode::ptr& child: parent->children)
-				if(child->hash == node->hash)
+			for(int i = 0; i < parent->children.read_lock()->size(); i++)
+				if(parent->children.read_lock()[i]->hash == node->hash)
 					throw std::runtime_error("Transaction with hash `" + parent->hash + "` already has a child with hash `" + node->hash + "`");
 		}
 
@@ -387,7 +450,7 @@ public:
 			// For each parent of the new node... add the node as a child of that parent
 			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
 			for(const TransactionNode::ptr& parent: node->parents)
-				parent->children.push_back(node);
+				parent->children->push_back(node);
 		} // End Critical Region
 
 		// Return the hash of the node
@@ -401,15 +464,17 @@ public:
 			throw NodeNotFoundException(node->hash);
 
 		// Ensure the node doesn't have any children (is a tip)
-		if(!node->children.empty())
+		if(!node->children.read_lock()->empty())
 			throw std::runtime_error("Only tip nodes can be removed from the graph. Tried to remove non-tip with hash `" + node->hash + "`");
 
 		{ // Begin Critical Region
 			std::scoped_lock lock(mutex);
 
 			// Remove the node as a child from each of its parents
-			for(const TransactionNode::ptr& parent: node->parents)
-				std::erase(parent->children, node);
+			for(int i = 0; i < node->parents.size(); i++){
+				auto lock = node->parents[i]->children.write_lock();
+				std::erase(*lock, node);
+			}
 		} // End Critical Region
 
 		// Nulify the passed in reference to the node
@@ -453,8 +518,8 @@ public:
 					balance += output.amount;
 
 			// Add the children to the queue
-			for(auto& child: head->children)
-				q.push(child);
+			for(int i = 0; i < head->children.read_lock()->size(); i++)
+				q.push(head->children.read_lock()[i]);
 			// Mark ourselves as visited
 			foundNodes.push_back(head->hash);
 		}
@@ -471,8 +536,8 @@ public:
 	}
 
 	// Function which lists all of the transactions in the tangle
-	std::list<Transaction*> listTransactions(){
-		std::list<Transaction*> out;
+	std::list<TransactionNode*> listTransactions(){
+		std::list<TransactionNode*> out;
 		genesis->recursivelyListTransactions(out);
 
 		return out;
@@ -484,15 +549,15 @@ protected:
 	void recursiveGetTips(const TransactionNode::ptr& head, std::vector<TransactionNode::ptr>& tips) const {
 		if(!head) return;
 		// If the node has no children, it is a tip and should be added to the list of tips (if not already in the list of tips)
-		if(head->children.empty()){
+		if(head->children.read_lock()->empty()){
 			if(!util::contains(tips.begin(), tips.end(), head, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b) {
 				if(!a || !b) return false;
 				return a->hash == b->hash;
 			}))
 				tips.push_back(head);
 		// Otherwise, recursively consider the node's children
-		} else for(const TransactionNode::ptr& child: head->children)
-			recursiveGetTips(child, tips);
+		} else for(int i = 0; i < head->children.read_lock()->size(); i++)
+			recursiveGetTips(head->children.read_lock()[i], tips);
 	}
 };
 
