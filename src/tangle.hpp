@@ -342,6 +342,8 @@ struct Tangle {
 
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
+	// List of tips
+	const monitor<std::vector<TransactionNode::ptr>> tips;
 
 protected:
 	// Mutex used to synchronize modifications across threads
@@ -358,23 +360,20 @@ public:
 	}()) {}
 
 	// Clean up the graph, in memory, on exit
-	~Tangle() {
-		// Repeatedly remove tips until the genesis node is the only node left in the graph
-		while(!genesis->children.read_lock()->empty())
-			for(auto tip: getTips())
-				removeTip(tip);
-	}
+	~Tangle() { setGenesis(nullptr); }
 
 	// Function which sets the genesis node
 	void setGenesis(TransactionNode::ptr genesis){
-		// Mark this old node as the genesis
-		util::makeMutable(genesis->isGenesis) = true;
+		// Mark the new node as the genesis
+		if(genesis) util::makeMutable(genesis->isGenesis) = true;
 
 		// Free the memory for every child of the old genesis (if it exists)
 		if(this->genesis)
-			while(!this->genesis->children.read_lock()->empty())
-				for(auto& tip: getTips())
-					removeTip(tip);
+			while(!this->genesis->children.read_lock()->empty()){
+				size_t size = tips.read_lock()->size();
+				for(int i = 0; i < size; i++)
+					removeTip(util::makeMutable(tips.unsafe())[0]);
+			}
 
 		// Update the genesis
 		util::makeMutable(this->genesis) = genesis;
@@ -447,10 +446,18 @@ public:
 		{ // Begin Critical Region
 			std::scoped_lock lock(mutex);
 
-			// For each parent of the new node... add the node as a child of that parent
+			// For each parent of the new node...
 			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
-			for(const TransactionNode::ptr& parent: node->parents)
+			for(const TransactionNode::ptr& parent: node->parents){
+				// Remove the parent from the list of tips
+				auto tipsLock = tips.write_lock();
+				std::erase(*tipsLock, parent);
+
+				// Add the node as a child of that parent
 				parent->children->push_back(node);
+				// Add the node to the list of tips
+				tipsLock->push_back(node);
+			}
 		} // End Critical Region
 
 		// Return the hash of the node
@@ -458,7 +465,10 @@ public:
 	}
 
 	// Function which removes a node from the graph (can only remove tips, nodes with no children)
-	void removeTip(TransactionNode::ptr& node){
+	void removeTip(TransactionNode::ptr node){
+		// Make sure the pointer is valid
+		if(!node) return;
+
 		// Ensure the node is in the graph
 		if(!find(node->hash))
 			throw NodeNotFoundException(node->hash);
@@ -469,23 +479,27 @@ public:
 
 		{ // Begin Critical Region
 			std::scoped_lock lock(mutex);
+			auto tipsLock = tips.write_lock();
 
 			// Remove the node as a child from each of its parents
-			for(int i = 0; i < node->parents.size(); i++){
+			for(size_t i = 0; i < node->parents.size(); i++){
 				auto lock = node->parents[i]->children.write_lock();
 				std::erase(*lock, node);
+
+				// If the parent no longer has children, mark it as a tip
+				if(lock->empty())
+					tipsLock->push_back(node->parents[i]);
 			}
+
+			// Remove the node from the list of tips
+			std::erase(*tipsLock, node);
+
+			// Clear the list of parents
+			util::makeMutable(node->parents).clear();
 		} // End Critical Region
 
 		// Nulify the passed in reference to the node
 		node.reset((TransactionNode*) nullptr);
-	}
-
-	// Function which finds all of the tip nodes in the graph
-	std::vector<TransactionNode::ptr> getTips() const {
-		std::vector<TransactionNode::ptr> out;
-		recursiveGetTips(genesis, out);
-		return out;
 	}
 
 	// Function which queries the balance currently associated with a given key
@@ -541,23 +555,6 @@ public:
 		genesis->recursivelyListTransactions(out);
 
 		return out;
-	}
-
-
-protected:
-	// Helper function which recursively finds all of the tips in the graph
-	void recursiveGetTips(const TransactionNode::ptr& head, std::vector<TransactionNode::ptr>& tips) const {
-		if(!head) return;
-		// If the node has no children, it is a tip and should be added to the list of tips (if not already in the list of tips)
-		if(head->children.read_lock()->empty()){
-			if(!util::contains(tips.begin(), tips.end(), head, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b) {
-				if(!a || !b) return false;
-				return a->hash == b->hash;
-			}))
-				tips.push_back(head);
-		// Otherwise, recursively consider the node's children
-		} else for(int i = 0; i < head->children.read_lock()->size(); i++)
-			recursiveGetTips(head->children.read_lock()[i], tips);
 	}
 };
 

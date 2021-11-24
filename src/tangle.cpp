@@ -3,21 +3,20 @@
 // Create a transaction node, automatically mining and performing consensus on it
 // NOTE: when this transaction is added to the tangle, verification of the transaction will automatically be preformed
 TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::vector<Transaction::Input>& inputs, const std::vector<Transaction::Output>& outputs, uint8_t difficulty /*= 3*/){
-	size_t tipCount = t.getTips().size();
-
 	// Select two different (unless there is only 1) tips at random
 	auto tip1 = t.biasedRandomWalk();
-	while(!tip1) tip1 = t.biasedRandomWalk(); // Make sure tip1 exists
-
 	auto tip2 = t.biasedRandomWalk();
-	while(tipCount > 2 && tip1 == tip2)
+	// 256 tries to find a different tip before giving up
+	for(auto [counter, tipCount] = std::make_pair(uint8_t(1), t.tips.read_lock()->size());
+	  tipCount > 1 && tip1 == tip2 && counter != 0; counter++)
 		tip2 = t.biasedRandomWalk();
 
 	if(!tip1 || !tip2) throw std::runtime_error("Failed to find a tip!");
 
 	// Create the transaction
-	auto trx = TransactionNode::create({tip1, tip2}, inputs, outputs, difficulty);
-	if(tipCount <= 2) trx = TransactionNode::create({tip1}, inputs, outputs, difficulty);
+	TransactionNode::ptr trx;
+	if(tip1 != tip2) trx = TransactionNode::create({tip1, tip2}, inputs, outputs, difficulty);
+	else trx = TransactionNode::create({tip1}, inputs, outputs, difficulty);
 	// Mine the transaction
 	trx->mineTransaction();
 	return trx;

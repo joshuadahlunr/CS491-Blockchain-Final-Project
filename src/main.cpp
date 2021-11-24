@@ -278,7 +278,7 @@ int main(int argc, char* argv[]) {
 		// Randomly walk to find a tip
 		case 'r':
 			{
-				std::cout << t.getTips().size() << " tips to find" << std::endl;
+				std::cout << t.tips.read_lock()->size() << " tips to find" << std::endl;
 				auto res = t.genesis->biasedRandomWalk(5, 0);
 				std::cout << "found: " << res->hash << std::endl;
 				std::cout << t.genesis->isChild(res) << std::endl;
