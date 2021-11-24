@@ -225,10 +225,13 @@ int main(int argc, char* argv[]) {
 				if(accountHash == "r" && !network->peers().empty()){
 					size_t id = rand() % network->peers().size();
 					auto chosen = network->peers().begin();
-					for(int i = 0; i < id; i++) chosen++;
+					for(int i = 1; i < id; i++) chosen++;
 
-					accountHash = key::hash(t.peerKeys[chosen->second.id()]);
-				} else if(accountHash == "r")
+					if(t.peerKeys.contains(chosen->second.id()))
+						accountHash = key::hash(t.peerKeys[chosen->second.id()]);
+				}
+				// If we failed to find a random account to send to... send to ourselves
+				if(accountHash == "r")
 					accountHash = key::hash(t.personalKeys->pub);
 
 				try{
