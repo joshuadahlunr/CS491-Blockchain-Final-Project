@@ -55,6 +55,15 @@ namespace util {
 		return std::mktime(std::gmtime(&now));
 	}
 
+	// Function which prints out the given range
+	template<typename Iterator>
+	std::ostream& print(std::ostream& out, Iterator begin, Iterator end){
+		for(auto i = begin; i != end; i++)
+			out << *i << ", ";
+		out << "\b\b";
+		return out;
+	}
+
 
 	// -- Conversion Functions --
 

@@ -200,67 +200,46 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return chosen->first->biasedRandomWalk(alpha);
 	}
 
-	// Function which generates a set of nodes that we can randomly walk from
-	// The nodes are the set of nodes whose depth is <depth> greater than the current node's depth (or the genesis if that depth is not in the tangle)
-	std::list<TransactionNode::ptr> generateWalkSet(size_t depth){
-		std::list<TransactionNode::ptr> out;
-		// Add the children and this to the queue (the children will hopefully let us get a larger set of nodes to walk from)
-		std::queue<TransactionNode::ptr> q;
-		for(size_t i = 0; i < children.read_lock()->size(); i++)
-			q.push(children.read_lock()[i]);
-		q.push(shared_from_this());
-
-		// Cache our depth
-		size_t localDepth = this->depth();
-
-		// While there are still things in the queue (and we haven't found a large enouph set)
-		while(!q.empty() && out.size() < 100){
-			// Pop the head and ensure it isn't null
-			TransactionNode::ptr& head = q.front();
-			q.pop();
-			if(!head) continue;
-
-			// If the head is at the desired depth...
-			if(head->depth() == localDepth + depth){
-				// Add the head to the set if it isn't already there
-				if(!util::contains(out.begin(), out.end(), head, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b){
-					if(!a || !b) return false;
-					return a->hash == b->hash;
-				}))
-					out.push_back(head);
-
-			// Otherwise, if the desired depth would extend past the genesis, our set is the genesis
-			} else if(head->isGenesis)
-				return { head };
-
-			// Otherwise search through the head's parents
-			else for(size_t i = 0; i < parents.size(); i++)
-				q.push(parents[i]);
-		}
-
-		return out;
-	}
 
 	// Function which determines how confident the network is in a transaction
 	double confirmationConfidence() {
-		Timer t;
-		std::cout << "walk gen" << std::endl;
-		// Generate a 100 element long list of nodes to walk from
-		std::list<TransactionNode::ptr> walkList = generateWalkSet(5);
-		for(auto i = walkList.begin(); walkList.size() < 100; i++){
-			if(i == walkList.end()) i = walkList.begin();
-			walkList.push_back(*i);
-		}
+		// Generates a list of all parents going 5 levels deep (if able)
+		auto generateWalkSet = [this](){
+			std::list<TransactionNode::ptr> out;
+			for(auto parent: parents) {
+				out.push_back(parent);
+				for(auto parent2: parent->parents){
+					out.push_back(parent2);
+					for(auto parent3: parent2->parents){
+						out.push_back(parent3);
+						for(auto parent4: parent3->parents){
+							out.push_back(parent4);
+							for(auto parent5: parent4->parents)
+								out.push_back(parent5);
+						}
+					}
+				}
+			}
+			return out;
+		};
 
-		std::cout << walkList.size() << std::endl;
+		// Merges two lists together
+		auto merge = [](std::list<TransactionNode::ptr>& a, std::list<TransactionNode::ptr> b){ // The second is a copy so that we duplicate the size of the list
+			a.insert(a.begin(), b.begin(), b.end());
+		};
+
+		// Generate an at least 100 element long list of nodes to walk from
+		std::list<TransactionNode::ptr> walkList = generateWalkSet();
+		while(walkList.size() < 100)
+			merge(walkList, walkList);
+
 
 		// Count the number of random walks from the set that result in a tip that aproves this node
 		uint8_t confidence = 0;
-		for(const TransactionNode::ptr& base: walkList)
-			if(auto tip = base->biasedRandomWalk(); tip && isChild(tip))
+		for(TransactionNode::ptr base: walkList){
+			if(auto tip = base->biasedRandomWalk(0); tip && isChild(tip))
 				confidence++;
-
-		std::cout << (int)confidence << std::endl;
+		}
 
 		// Convert the confidence to a fraction in the range [0, 1]
 		return confidence / double(walkList.size());
@@ -503,7 +482,7 @@ public:
 
 protected:
 	void updateCumulativeWeights(TransactionNode::ptr source){
-		Timer t;
+
 		// TODO: can these locks be removed since we are behind the add mutex?
 		std::queue<TransactionNode::ptr> q;
 		q.push(source);
