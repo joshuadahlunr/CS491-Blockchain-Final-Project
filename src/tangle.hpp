@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <list>
 #include <queue>
+#include <thread>
 
 #include "monitor.hpp"
 
@@ -19,6 +20,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// Smart pointer type of the node
 	using ptr = std::shared_ptr<TransactionNode>;
 
+	// Variable tracking the cumulative weight of this node
+	const float cumulativeWeight = 0;
 	// Variable tracking weather or not this transaction is the genesis transaction
 	const bool isGenesis = false; // TODO: should this go in the base transaction or here?
 	// Immutable list of parents of the node
@@ -143,66 +146,6 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		return sum;
 	}
 
-	// Function which recursively calculates the weight of a transaction
-	// float cumulativeWeight() const {
-	// 	// Tips just have their own weight
-	// 	if(children.empty())
-	// 		return ownWeight();
-	//
-	// 	float sum = ownWeight();
-	// 	for(const TransactionNode::ptr& child: children)
-	// 		if(child)
-	// 			sum += child->cumulativeWeight();
-	//
-	// 	return sum;
-	// }
-	// Function which recursively calculates the weight of a transaction
-	// float cumulativeWeight(std::list<TransactionNode::ptr>& considered) const {
-	// 	// Tips just have their own weight
-	// 	if(children.empty())
-	// 		return ownWeight();
-	//
-	// 	float sum = ownWeight();
-	// 	for(const TransactionNode::ptr& child: children)
-	// 		if(child)
-	// 			if(!util::contains(considered.begin(), considered.end(), child, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b){
-	// 				if(!a || !b) return false;
-	// 				return a->hash == b->hash;
-	// 			})){
-	// 				sum += child->cumulativeWeight(considered);
-	// 				considered.push_back(child);
-	// 			}
-	//
-	// 	return sum;
-	// }
-	// float cumulativeWeight() const {
-	// 	std::list<TransactionNode::ptr> considered;
-	// 	return cumulativeWeight(considered);
-	// }
-	float cumulativeWeight() const {
-		std::queue<TransactionNode::ptr> q;
-		for(size_t i = 0; i < children.read_lock()->size(); i++) q.push(children.read_lock()[i]);
-		std::list<TransactionNode::ptr> considered;
-
-		float sum = ownWeight();
-		while(!q.empty()){
-			auto head = q.front();
-			q.pop();
-			if(!head) continue;
-			if(util::contains(considered.begin(), considered.end(), head, [](TransactionNode::ptr a, TransactionNode::ptr b){
-				if(!a || !b) return false;
-				return a->hash == b->hash;
-			})) continue;
-
-			if(head) sum += head->ownWeight();
-
-			for(size_t i = 0; i < head->children.read_lock()->size(); i++)
-				q.push(head->children.read_lock()[i]);
-		}
-
-		return sum;
-	}
-
 	// Function which calculates the height (longest path to genesis) of the transaction
 	size_t height() const {
 		if(isGenesis) return 0;
@@ -242,11 +185,10 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 		// Create a weighted list of children
 		std::list<std::pair<TransactionNode*, double>> weightedList;
-		size_t ourWeight = cumulativeWeight();
 		double totalWeight = 0;
 		for(size_t i = 0; i < children.read_lock()->size(); i++){
 			TransactionNode::ptr& child = children.read_lock()[i];
-			double weight = std::max( std::exp(-alpha * (ourWeight - child->cumulativeWeight())), std::numeric_limits<double>::min() );
+			double weight = std::max( std::exp(-alpha * (cumulativeWeight - child->cumulativeWeight)), std::numeric_limits<double>::min() );
 			weightedList.emplace_back(child.get(), weight);
 			totalWeight += weight;
 		}
@@ -349,6 +291,9 @@ protected:
 	// Mutex used to synchronize modifications across threads
 	std::mutex mutex;
 
+	// Flag which determines if a transaction add should recalculate weights or not
+	bool updateWeights = true;
+
 public:
 
 	// Upon creation generate a genesis block
@@ -369,11 +314,9 @@ public:
 
 		// Free the memory for every child of the old genesis (if it exists)
 		if(this->genesis)
-			while(!this->genesis->children.read_lock()->empty()){
-				size_t size = tips.read_lock()->size();
-				for(int i = 0; i < size; i++)
+			while(!this->genesis->children.read_lock()->empty())
+				for(size_t i = 0, size = tips.read_lock()->size(); i < size; i++)
 					removeTip(util::makeMutable(tips.unsafe())[0]);
-			}
 
 		// Update the genesis
 		util::makeMutable(this->genesis) = genesis;
@@ -458,6 +401,11 @@ public:
 				// Add the node to the list of tips
 				tipsLock->push_back(node);
 			}
+
+			// Update the weights of all the nodes aproved by this node
+			if(updateWeights) std::thread([this, node](){
+				updateCumulativeWeights(node);
+			}).detach();
 		} // End Critical Region
 
 		// Return the hash of the node
@@ -556,6 +504,31 @@ public:
 
 		return out;
 	}
+
+protected:
+	void updateCumulativeWeights(TransactionNode::ptr source){
+		Timer t;
+		// TODO: can these locks be removed since we are behind the add mutex?
+		std::queue<TransactionNode::ptr> q;
+		q.push(source);
+
+		while(!q.empty()){
+			auto head = q.front();
+			q.pop();
+			if(!head) continue;
+
+			// Update the weight of this node based on the weights of the children
+			float cumulativeWeight = head->ownWeight();
+			for(size_t i = 0, size = head->children.read_lock()->size(); i < size; i++)
+				cumulativeWeight += head->children.read_lock()[i]->cumulativeWeight;
+			util::makeMutable(head->cumulativeWeight) = cumulativeWeight;
+
+			// Add this node's parents to the back of the queue
+			for(auto& parent: head->parents)
+				q.push(parent);
+		}
+	}
+
 };
 
 #endif /* end of include guard: GRAPH_H */

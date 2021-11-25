@@ -181,6 +181,7 @@ struct NetworkedTangle: public Tangle {
 		Transaction trx;
 		d >> trx;
 		listeningForGenesisSync = true; // Flag us as prepared to receive a new genesis
+		updateWeights = false; // Flag us as not reclaculating weights
 		network.send_object_to_self(SyncGenesisRequest(trx, *personalKeys));
 
 		// Read in each transaction from the deserializer and then add it to the tangle
@@ -188,6 +189,13 @@ struct NetworkedTangle: public Tangle {
 			d >> trx;
 			network.send_object_to_self(SynchronizationAddTransactionRequest(trx, *personalKeys));
 		}
+
+		// Flag that weights can start updating again and update our weight
+		updateWeights = true;
+		std::thread([this](){
+			for(size_t i = 0, size = tips.read_lock()->size(); i < size; i++)
+				updateCumulativeWeights(tips.read_lock()[i]);
+		}).detach();
 	}
 
 private:

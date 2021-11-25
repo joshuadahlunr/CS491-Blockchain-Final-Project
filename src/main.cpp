@@ -268,7 +268,7 @@ int main(int argc, char* argv[]) {
 					std::cout << "Confidence: " << (trx->confirmationConfidence() * 100) << "%" << std::endl;
 					std::cout << "Weight: " << trx->ownWeight() << std::endl;
 					std::cout << "Score: " << trx->score() << std::endl;
-					std::cout << "Cumulative weight: " << trx->cumulativeWeight() << std::endl;
+					std::cout << "Cumulative weight: " << trx->cumulativeWeight << std::endl;
 					std::cout << "Height: " << trx->height() << std::endl;
 					std::cout << "Depth: " << trx->depth() << std::endl;
 				}
