@@ -202,7 +202,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 
 	// Function which determines how confident the network is in a transaction
-	double confirmationConfidence() {
+	float confirmationConfidence() {
 		// Generates a list of all parents going 5 levels deep (if able)
 		auto generateWalkSet = [this](){
 			std::list<TransactionNode::ptr> out;
@@ -242,7 +242,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		}
 
 		// Convert the confidence to a fraction in the range [0, 1]
-		return confidence / double(walkList.size());
+		return confidence / float(walkList.size());
 	}
 };
 
@@ -425,8 +425,8 @@ public:
 		node.reset((TransactionNode*) nullptr);
 	}
 
-	// Function which queries the balance currently associated with a given key
-	double queryBalance(const key::PublicKey& account) const {
+	// Function which queries the balance of a given key only using transactions with a certain level of confidence
+	double queryBalance(const key::PublicKey& account, float confidenceThreshold = 0) const {
 		std::list<std::string> considered;
 		std::queue<TransactionNode::ptr> q;
 		double balance = 0;
@@ -437,14 +437,10 @@ public:
 			head = q.front();
 			q.pop();
 
-			// Don't count the same transaction more than once in the balance
-			if(std::find(considered.begin(), considered.end(), head->hash) != considered.end()) continue;
-
 			// Add up how this transaction takes away from the balance of interest
 			for(const Transaction::Input& input: head->inputs)
 				if(input.account == account)
 					balance -= input.amount;
-
 			// If the balance becomes negative except
 			if(balance < 0)
 				throw InvalidBalance(head, account, balance);
@@ -453,17 +449,26 @@ public:
 			for(const Transaction::Output& output: head->outputs)
 				if(output.account == account)
 					balance += output.amount;
+			// If the balance becomes negative except
+			if(balance < 0)
+				throw InvalidBalance(head, account, balance);
 
-			// Add the children to the queue
-			for(int i = 0; i < head->children.read_lock()->size(); i++)
-				q.push(head->children.read_lock()[i]);
-			// Mark ourselves as visited
-			considered.push_back(head->hash);
+			// Add the children to the queue (if they have sufficient confidence and/or haven't already been considered)
+			{
+				auto childLock = head->children.read_lock();
+				for(int i = 0; i < childLock->size(); i++)
+					if(std::find(considered.begin(), considered.end(), childLock[i]->hash) == considered.end()){
+						if(confidenceThreshold < std::numeric_limits<float>::epsilon() // Only check the transaction's confidence if the threshold is greater than 0
+						  || childLock[i]->confirmationConfidence() >= confidenceThreshold)
+							q.push(childLock[i]);
+						considered.push_back(childLock[i]->hash);
+					}
+			}
 		}
 
 		return balance;
 	}
-	double queryBalance(const key::KeyPair& pair) const { return queryBalance(pair.pub); }
+	double queryBalance(const key::KeyPair& pair, float confidenceThreshold = 0) const { return queryBalance(pair.pub, confidenceThreshold); }
 
 	// Function which prints out the tangle
 	void debugDump() const {

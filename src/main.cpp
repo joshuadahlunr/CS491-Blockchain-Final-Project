@@ -285,7 +285,7 @@ int main(int argc, char* argv[]) {
 		// Query our balance
 		case 'b':
 			{
-				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << std::endl;
+				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << "(0%) " << t.queryBalance(t.personalKeys->pub, .5) << "(50%) " <<  t.queryBalance(t.personalKeys->pub, .95) << "(95%)"<< std::endl;
 			}
 			break;
 
