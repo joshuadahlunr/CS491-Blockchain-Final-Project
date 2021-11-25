@@ -80,7 +80,7 @@ struct Transaction {
 	Hash hash = INVALID_HASH;
 
 	Transaction() = default;
-	Transaction(const std::span<Hash> parentHashes, const std::vector<Input>& inputs, const std::vector<Output>& outputs) : timestamp(util::utc_now()), inputs(inputs), outputs(outputs),
+	Transaction(const std::span<Hash> parentHashes, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) : timestamp(util::utc_now()), miningDifficulty(difficulty), inputs(inputs), outputs(outputs),
 		// Set a random initial value for the nonce
 		nonce([]() -> size_t {
 			// Seed random number generator
@@ -108,6 +108,8 @@ struct Transaction {
 	Transaction& operator=(const Transaction& _new){
 		util::makeMutable(timestamp) = _new.timestamp;
 		util::makeMutable(nonce) = _new.nonce;
+		util::makeMutable(miningDifficulty) = _new.miningDifficulty;
+		util::makeMutable(miningTarget) = _new.miningTarget;
 		util::makeMutable(inputs) = _new.inputs;
 		util::makeMutable(outputs) = _new.outputs;
 
@@ -128,6 +130,8 @@ struct Transaction {
 	Transaction& operator=(Transaction&& _new){
 		util::makeMutable(timestamp) = _new.timestamp;
 		util::makeMutable(nonce) = _new.nonce;
+		util::makeMutable(miningDifficulty) = _new.miningDifficulty;
+		util::makeMutable(miningTarget) = _new.miningTarget;
 		util::makeMutable(inputs) = std::move(_new.inputs);
 		util::makeMutable(outputs) = std::move(_new.outputs);
 		util::makeMutable(parentHashes) = _new.parentHashes;
@@ -149,7 +153,8 @@ struct Transaction {
 		std::cout << " ]" << std::endl;
 
 		std::cout << "Timestamp: " << std::put_time(std::localtime((time_t*) &timestamp), "%c %Z") << std::endl
-			<< "Nonce: " << nonce << std::endl;
+			<< "Nonce: " << nonce << std::endl
+			<< "Difficulty: " << (int) miningDifficulty << std::endl;
 
 		std::cout << "Inputs: [" << std::endl;
 		for(auto& i: inputs)
@@ -286,11 +291,10 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 		d >> outputs[i].amount;
 	}
 
-	t = Transaction(parentHashes, inputs, outputs);
+	t = Transaction(parentHashes, inputs, outputs, miningDifficulty);
 	// Update several variables behind the scenes
 	util::makeMutable(t.timestamp) = timestamp;
 	util::makeMutable(t.nonce) = nonce;
-	util::makeMutable(t.miningDifficulty) = miningDifficulty;
 	util::makeMutable(t.miningTarget) = miningTarget;
 	util::makeMutable(t.hash) = t.hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 	return d;

@@ -24,22 +24,22 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// List of children of the node
 	std::vector<TransactionNode::ptr> children;
 
-	TransactionNode(const std::vector<TransactionNode::ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs) :
-		// Upon construction, construct the base transaction with the hashes of the parent nodes
+	TransactionNode(const std::vector<TransactionNode::ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) :
+		// Construct the base transaction with the hashes of the parent nodes
 		Transaction([](const std::vector<TransactionNode::ptr>& parents) -> std::vector<std::string> {
 			std::vector<std::string> out;
 			for(const TransactionNode::ptr& p: parents)
 				out.push_back(p->hash);
 			return out;
-		}(parents), inputs, outputs), parents(parents) {}
+		}(parents), inputs, outputs, difficulty), parents(parents) { }
 
 	// Function which creates a node ptr
-	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, std::vector<Input> inputs, std::vector<Output> outputs) {
-		return std::make_shared<TransactionNode>(parents, inputs, outputs);
+	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, std::vector<Input> inputs, std::vector<Output> outputs, uint8_t difficulty = 3) {
+		return std::make_shared<TransactionNode>(parents, inputs, outputs, difficulty);
 	}
 
 	// Create a transaction node, automatically mining and performing consensus on it
-	static TransactionNode::ptr createAndMine(const Tangle& t, const std::vector<Input>& inputs, const std::vector<Output>& outputs);
+	static TransactionNode::ptr createAndMine(const Tangle& t, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3);
 
 	// Function which converts a transaction into a transaction node
 	static TransactionNode::ptr create(const Tangle& t, const Transaction& trx);
@@ -68,15 +68,16 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which recursively determines if the target is a child
 	bool isChild(TransactionNode::ptr& target) const {
+		bool found = false;
 		for(auto& child: children){
 			// If this child is the target then it is a child of this node
 			if(child->hash == target->hash)
 				return true;
 			// Otherwise... look in the child's children
-			else return child->isChild(target);
+			else found |= child->isChild(target);
 		}
 		// If none of the children or their children are the target it is not a child of this node
-		return false;
+		return found;
 	}
 
 	// Function which recursively prints out all of nodes in the graph
@@ -97,14 +98,14 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which converts the tangle into a list
 	void recursivelyListTransactions(std::list<Transaction*>& transactions){
-		Transaction* self = this;
 		// We only care about a node if it isn't already in the list
-		if(std::search(transactions.begin(), transactions.end(), &self, (&self) + 1, [](Transaction* a, Transaction* b){
+		if(util::contains(transactions.begin(), transactions.end(), this, [](Transaction* a, Transaction* b){
+			if(!a || !b) return false;
 			return a->hash == b->hash;
-		}) != transactions.end()) return;
+		})) return;
 
 		// Add us to the list
-		transactions.push_back(self);
+		transactions.push_back(this);
 		// Add our children to the list
 		for(auto& child: children)
 			child->recursivelyListTransactions(transactions);
@@ -113,59 +114,155 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// -- Consensus Functions
 
 
-	// Function which recursively calculates the weight of a transaction
-	size_t cumulativeWeight() const {
-		// Tips have weight 1
-		if(children.empty())
-			return 1;
+	// Function which calculates the weight of this transcation, based on its mining difficulty (capped at 1 when difficulty is 5)
+	float ownWeight() const { return std::min(miningDifficulty / 5.f, 1.f); }
 
-		size_t sum = 1;
-		for(const TransactionNode::ptr& child: children)
-			sum += child->cumulativeWeight();
+	// Function which calculates the score (weight of aproved transactions) of this transaction
+	float score() const {
+		if(isGenesis) return ownWeight();
+
+		float sum = ownWeight();
+		for(const TransactionNode::ptr& parent: parents)
+			sum += parent->score();
 
 		return sum;
 	}
 
+	// Function which recursively calculates the weight of a transaction
+	float cumulativeWeight() const {
+		// Tips just have their own weight
+		if(children.empty())
+			return ownWeight();
+
+		float sum = ownWeight();
+		for(const TransactionNode::ptr& child: children)
+			if(child)
+				sum += child->cumulativeWeight();
+
+		return sum;
+	}
+
+	// Function which calculates the height (longest path to genesis) of the transaction
+	size_t height() const {
+		if(isGenesis) return 0;
+
+		size_t max = 0;
+		for(const TransactionNode::ptr& parent: parents)
+			max = std::max(parent->height(), max);
+
+		return max + 1;
+	}
+
+	// Function which calculates the depth (longest path to tip) of the transaction
+	size_t depth() const {
+		if(children.empty()) return 0;
+
+		size_t max = 0;
+		for(const TransactionNode::ptr& child: children)
+			max = std::max(child->depth(), max);
+
+		return max + 1;
+	}
+
 	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
-	TransactionNode::ptr biasedRandomWalk(float alpha = 1.0) {
-		// TODO: Whitepaper has more info on alpha
-
+	TransactionNode::ptr biasedRandomWalk(double alpha = 5, double stepBackProb = 1/10.0) {
 		// Seed random number generator
-		static CryptoPP::AutoSeededRandomPool rng;
+		CryptoPP::AutoSeededRandomPool rng;
 
-		// If we are a tip get the shared pointer referencing us
+		// If we are a tip, get the shared pointer referencing us
 		if(children.empty())
 			return shared_from_this();
 
+		// // Have a small probability of stepping back towards the parents
+		// double stepBack = util::rand2double(rng.GenerateWord32(), rng.GenerateWord32());
+		// if(stepBack <= stepBackProb && parents.size())
+		// 	return parents[rng.GenerateWord32(0, parents.size() - 1)]->biasedRandomWalk(alpha, stepBackProb);
+
 		// Create a weighted list of children
-		std::list<TransactionNode*> weightedList;
+		std::list<std::pair<TransactionNode*, double>> weightedList;
+		size_t ourWeight = cumulativeWeight();
+		double totalWeight = 0;
 		for(TransactionNode::ptr& child: children){
-			auto weight = child->cumulativeWeight();
-			// Add weight * alpha copies of the child to the list
-			for(size_t i = 0; i < size_t(std::min(weight * alpha, 1.0f)); i++)
-				weightedList.push_back(child.get());
+			double weight = std::exp( -alpha * (ourWeight - child->cumulativeWeight()) );
+			weightedList.emplace_back(child.get(), weight);
+			totalWeight += weight;
 		}
 
-		// Randomly chose a child from the weighted list
-		auto index = rng.GenerateWord32(0, weightedList.size() - 1); // Inclusive generation so we must decrease the size of the list by 1
+		// Randomly choose a child from the weighted list
+		double random = util::rand2double(rng.GenerateWord32(), rng.GenerateWord32()) * totalWeight;
 		auto chosen = weightedList.begin();
-		for(size_t i = 0; i < index; i++) chosen++;
+		for(double w = 0; w <= random && chosen != weightedList.end(); w += chosen->second)
+			if(w > 0)
+				chosen++;
+
+		// Ensure that the chosen node is valid
+		if(chosen == weightedList.end()) chosen = --weightedList.end();
+		if(!chosen->first) chosen = weightedList.begin();
 
 		// Recursively walk down the chosen child
-		return (*chosen)->biasedRandomWalk(alpha);
+		return chosen->first->biasedRandomWalk(alpha);
+	}
+
+	// Function which generates a set of nodes that we can randomly walk from
+	// The nodes are the set of nodes whose depth is <depth> greater than the current node's depth (or the genesis if that depth is not in the tangle)
+	std::list<TransactionNode::ptr> generateWalkSet(size_t depth){
+		std::list<TransactionNode::ptr> out;
+		// Add the children and this to the queue (the children will hopefully let us get a larger set of nodes to walk from)
+		std::queue<TransactionNode::ptr> q;
+		for(auto& child: children)
+			q.push(child);
+		q.push(shared_from_this());
+
+		// Cache our depth
+		size_t localDepth = this->depth();
+
+		// While there are still things in the queue
+		while(!q.empty()){
+			// Pop the head and ensure it isn't null
+			TransactionNode::ptr& head = q.front();
+			q.pop();
+			if(!head) continue;
+
+			// If the head is at the desired depth...
+			if(head->depth() == localDepth + depth){
+				// Add the head to the set if it isn't already there
+				if(!util::contains(out.begin(), out.end(), head, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b){
+					if(!a || !b) return false;
+					return a->hash == b->hash;
+				}))
+					out.push_back(head);
+
+			// Otherwise, if the desired depth would extend past the genesis, our set is the genesis
+			} else if(head->isGenesis)
+				return { head };
+
+			// Otherwise search through the head's parents
+			else for(auto& parent: head->parents)
+				q.push(parent);
+		}
+
+		return out;
 	}
 
 	// Function which determines how confident the network is in a transaction
-	float confirmationConfidence() {
-		uint8_t confidence = 0;
-		for(size_t i = 0; i < 100; i++){
-			auto tip = biasedRandomWalk();
-			if(isChild(tip))
-				confidence++;
+	double confirmationConfidence() {
+		// Generate a 100 element long list of nodes to walk from
+		std::list<TransactionNode::ptr> walkList = generateWalkSet(5);
+		for(auto i = walkList.begin(); walkList.size() < 100; i++){
+			if(i == walkList.end()) i = walkList.begin();
+			walkList.push_back(*i);
 		}
 
+		// Count the number of random walks from the set that result in a tip that aproves this node
+		uint8_t confidence = 0;
+		for(const TransactionNode::ptr& base: walkList)
+			if(auto tip = base->biasedRandomWalk(); tip && isChild(tip))
+				confidence++;
+
+		std::cout << (int)confidence << std::endl;
+
 		// Convert the confidence to a fraction in the range [0, 1]
-		return confidence / 100.0;
+		return confidence / double(walkList.size());
 	}
 };
 
@@ -180,9 +277,10 @@ struct Tangle {
 		InvalidBalance(TransactionNode::ptr node, const key::PublicKey& account, double balance) : std::runtime_error("Node with hash `" + node->hash + "` results in a balance of `" + std::to_string(balance) + "` for an account."), node(node), account(account) {}
 	};
 
-protected:
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
+
+protected:
 	// Mutex used to synchronize modifications across threads
 	std::mutex mutex;
 
@@ -384,13 +482,16 @@ public:
 protected:
 	// Helper function which recursively finds all of the tips in the graph
 	void recursiveGetTips(const TransactionNode::ptr& head, std::vector<TransactionNode::ptr>& tips) const {
+		if(!head) return;
 		// If the node has no children, it is a tip and should be added to the list of tips (if not already in the list of tips)
-		if(head->children.empty() && std::search(tips.begin(), tips.end(), &head, (&head) + 1, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b) {
-			return a->hash == b->hash;
-		}) == tips.end())
-			tips.push_back(head);
+		if(head->children.empty()){
+			if(!util::contains(tips.begin(), tips.end(), head, [](const TransactionNode::ptr& a, const TransactionNode::ptr& b) {
+				if(!a || !b) return false;
+				return a->hash == b->hash;
+			}))
+				tips.push_back(head);
 		// Otherwise, recursively consider the node's children
-		else for(const TransactionNode::ptr& child: head->children)
+		} else for(const TransactionNode::ptr& child: head->children)
 			recursiveGetTips(child, tips);
 	}
 };

@@ -68,6 +68,8 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
+	// Seed random number generation
+	srand(time(0));
 	// Make cout print numbers up to the million
 	std::cout << std::setprecision(7);
 
@@ -128,16 +130,17 @@ int main(int argc, char* argv[]) {
 		network->add_data_listener<NetworkedTangle::PublicKeySyncResponse>([networkKeys, &t](breep::tcp::netdata_wrapper<NetworkedTangle::PublicKeySyncResponse>& dw){
 			std::thread([networkKeys, &t, source = dw.source](){
 				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+				try {
+					if(t.queryBalance(t.peerKeys[source.id()]) == 0){
+						std::cout << "Sending `" << key::hash(t.peerKeys[source.id()]) << "` a million money!" << std::endl;
 
-				if(t.queryBalance(t.peerKeys[source.id()]) == 0){
-					std::cout << "Sending `" << key::hash(t.peerKeys[source.id()]) << "` a million money!" << std::endl;
-
-					std::vector<Transaction::Input> inputs;
-					inputs.emplace_back(*networkKeys, 1000000);
-					std::vector<Transaction::Output> outputs;
-					outputs.emplace_back(t.peerKeys[source.id()], 1000000);
-					t.add(TransactionNode::createAndMine(t, inputs, outputs));
-				}
+						std::vector<Transaction::Input> inputs;
+						inputs.emplace_back(*networkKeys, 1000000);
+						std::vector<Transaction::Output> outputs;
+						outputs.emplace_back(t.peerKeys[source.id()], 1000000);
+						t.add(TransactionNode::createAndMine(t, inputs, outputs, 1));
+					}
+				} catch (...){}
 			}).detach();
 		});
 
@@ -145,11 +148,13 @@ int main(int argc, char* argv[]) {
 		std::thread([networkKeys, &t](){
 			std::cout << "Sending us a million money!" << std::endl;
 
-			std::vector<Transaction::Input> inputs;
-			inputs.emplace_back(*networkKeys, 1000000);
-			std::vector<Transaction::Output> outputs;
-			outputs.emplace_back(*t.personalKeys, 1000000);
-			t.add(TransactionNode::createAndMine(t, inputs, outputs));
+			try {
+				std::vector<Transaction::Input> inputs;
+				inputs.emplace_back(*networkKeys, 1000000);
+				std::vector<Transaction::Output> outputs;
+				outputs.emplace_back(*t.personalKeys, 1000000);
+				t.add(TransactionNode::createAndMine(t, inputs, outputs, 1));
+			} catch (...){}
 		}).detach();
 
 		std::cout << "Established a network on port " << localPort << std::endl;
@@ -192,9 +197,6 @@ int main(int argc, char* argv[]) {
 	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
-	srand(0);
-
-
 	breep::listener_id pingingID = 0;
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
@@ -209,11 +211,14 @@ int main(int argc, char* argv[]) {
 			{
 				// Ask who to send too and how much to send
 				std::string accountHash;
+				uint difficutly;
 				double amount;
 				std::cout << "Enter account to transfer to ('r' for random): ";
 				std::cin >> accountHash;
 				std::cout << "Enter amount to transfer: ";
 				std::cin >> amount;
+				std::cout << "Select mining difficulty (1-5): ";
+				std::cin >> difficutly;
 
 				// If they asked for random choose a random account
 				if(accountHash == "r" && !network->peers().empty()){
@@ -234,7 +239,7 @@ int main(int argc, char* argv[]) {
 
 					// Create, mine, and add the transaction
 					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
-					t.add(TransactionNode::createAndMine(t, inputs, outputs));
+					t.add(TransactionNode::createAndMine(t, inputs, outputs, difficutly));
 				} catch (Tangle::InvalidBalance ib) {
 					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
 				} catch (NetworkedTangle::InvalidAccount ia) {
@@ -261,7 +266,22 @@ int main(int argc, char* argv[]) {
 				if(trx){
 					trx->debugDump();
 					std::cout << "Confidence: " << (trx->confirmationConfidence() * 100) << "%" << std::endl;
+					std::cout << "Weight: " << trx->ownWeight() << std::endl;
+					std::cout << "Score: " << trx->score() << std::endl;
+					std::cout << "Cumulative weight: " << trx->cumulativeWeight() << std::endl;
+					std::cout << "Height: " << trx->height() << std::endl;
+					std::cout << "Depth: " << trx->depth() << std::endl;
 				}
+			}
+			break;
+
+		// Randomly walk to find a tip
+		case 'r':
+			{
+				std::cout << t.getTips().size() << " tips to find" << std::endl;
+				auto res = t.genesis->biasedRandomWalk(5, 0);
+				std::cout << "found: " << res->hash << std::endl;
+				std::cout << t.genesis->isChild(res) << std::endl;
 			}
 			break;
 
@@ -386,16 +406,18 @@ int main(int argc, char* argv[]) {
 								auto chosen = network->peers().begin();
 								for(int i = 0; i < id; i++) chosen++;
 
+								auto account = t.peerKeys[chosen->second.id()];
+
 								try{
 									// Create transaction inputs and outputs
 									std::vector<Transaction::Input> inputs;
 									inputs.emplace_back(*t.personalKeys, recieved);
 									std::vector<Transaction::Output> outputs;
-									outputs.emplace_back(t.peerKeys[chosen->second.id()], recieved);
+									outputs.emplace_back(account, recieved);
 
 									// Create, mine, and add the transaction
-									std::cout << "Sending " << recieved << " money to " << key::hash(t.peerKeys[chosen->second.id()]) << std::endl;
-									t.add(TransactionNode::createAndMine(t, inputs, outputs));
+									std::cout << "Sending " << recieved << " money to " << key::hash(account) << std::endl;
+									t.add(TransactionNode::createAndMine(t, inputs, outputs, /*difficulty*/ 2));
 								} catch (Tangle::InvalidBalance ib) {
 									std::cerr << ib.what() << " Discarding transaction!" << std::endl;
 								} catch (NetworkedTangle::InvalidAccount ia) {
