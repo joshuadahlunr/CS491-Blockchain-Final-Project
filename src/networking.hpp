@@ -102,6 +102,9 @@ struct NetworkedTangle: public Tangle {
 		network.add_data_listener<TangleSynchronizeRequest>([this] (breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& dw) -> void {
 			TangleSynchronizeRequest::listener(dw, *this);
 		});
+		network.add_data_listener<UpdateWeightsRequest>([this] (breep::tcp::netdata_wrapper<UpdateWeightsRequest>& dw) -> void {
+			UpdateWeightsRequest::listener(dw, *this);
+		});
 		network.add_data_listener<SyncGenesisRequest>([this] (breep::tcp::netdata_wrapper<SyncGenesisRequest>& dw) -> void {
 			SyncGenesisRequest::listener(dw, *this);
 		});
@@ -181,7 +184,6 @@ struct NetworkedTangle: public Tangle {
 		Transaction trx;
 		d >> trx;
 		listeningForGenesisSync = true; // Flag us as prepared to receive a new genesis
-		updateWeights = false; // Flag us as not reclaculating weights
 		network.send_object_to_self(SyncGenesisRequest(trx, *personalKeys));
 
 		// Read in each transaction from the deserializer and then add it to the tangle
@@ -190,12 +192,8 @@ struct NetworkedTangle: public Tangle {
 			network.send_object_to_self(SynchronizationAddTransactionRequest(trx, *personalKeys));
 		}
 
-		// Flag that weights can start updating again and update our weight
-		updateWeights = true;
-		std::thread([this](){
-			for(size_t i = 0, size = tips.read_lock()->size(); i < size; i++)
-				updateCumulativeWeights(tips.read_lock()[i]);
-		}).detach();
+		// Update our weights
+		network.send_object_to_self(UpdateWeightsRequest());
 	}
 
 private:
@@ -290,6 +288,9 @@ public:
 		static void listener(breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& networkData, NetworkedTangle& t){
 			recursiveSendTangle(networkData.source, t, t.genesis);
 
+			// Suggest that the recipient update their weights
+			t.network.send_object_to(networkData.source, UpdateWeightsRequest());
+
 			std::cout << "Sent tangle to `" << networkData.source.id() << "`" << std::endl;
 		}
 
@@ -300,6 +301,19 @@ public:
 
 			for(int i = 0; i < node->children.read_lock()->size(); i++)
 				recursiveSendTangle(requester, t, node->children.read_lock()[i]);
+		}
+	};
+
+	// Message which causes the tangle to update its weights
+	struct UpdateWeightsRequest {
+		static void listener(breep::tcp::netdata_wrapper<UpdateWeightsRequest>& networkData, NetworkedTangle& t){
+			// Update all the weights
+			std::thread([&t](){
+				for(size_t i = 0, size = t.tips.read_lock()->size(); i < size; i++)
+					t.updateCumulativeWeights(t.tips.read_lock()[i]);
+			}).detach();
+
+			std::cout << "Started updating tangle weights" << std::endl;
 		}
 	};
 
@@ -443,7 +457,9 @@ public:
 		using AddTransactionRequestBase::AddTransactionRequestBase;
 
 		static void listener(breep::tcp::netdata_wrapper<SynchronizationAddTransactionRequest>& networkData, NetworkedTangle& t){
+			t.updateWeights = false; // Flag us as NOT reclaculating weights
 			AddTransactionRequestBase::listener((*(breep::tcp::netdata_wrapper<AddTransactionRequestBase>*) &networkData), t); // TODO: is this a valid cast?
+			t.updateWeights = true; // Flag us as reclaculating weights
 		}
 	};
 };
@@ -472,6 +488,10 @@ BREEP_DECLARE_TYPE(NetworkedTangle::PublicKeySyncRequest)
 inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::TangleSynchronizeRequest& r) { return s; }
 inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::TangleSynchronizeRequest& r) { return d; }
 BREEP_DECLARE_TYPE(NetworkedTangle::TangleSynchronizeRequest)
+
+inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::UpdateWeightsRequest& r) { return s; }
+inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::UpdateWeightsRequest& r) { return d; }
+BREEP_DECLARE_TYPE(NetworkedTangle::UpdateWeightsRequest)
 
 inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangle::SyncGenesisRequest& r) {
 	breep::serializer s;

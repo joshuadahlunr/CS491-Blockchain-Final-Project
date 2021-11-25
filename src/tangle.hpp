@@ -50,55 +50,50 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	// Function which converts a transaction into a transaction node
 	static TransactionNode::ptr create(const Tangle& t, const Transaction& trx);
 
-	// Function which finds a node given its hash
-	TransactionNode::ptr recursiveFind(Hash& hash) {
-		// If our hash matches... return a smart pointer to ourselves
-		if(this->hash == hash){
-			// If we are the genesis node then the best we can do is convert the this pointer to a smart pointer
-			if(parents.empty())
-				return shared_from_this();
-			// Otherwise... find the pointer to ourselves in the first parent's list of child pointers
-			else
-				for(size_t i = 0; i < parents[0]->children.read_lock()->size(); i++){
-					auto lock = parents[0]->children.read_lock();
-					const TransactionNode::ptr& parentsChild = parents[0]->children.unsafe()[i];
-					if(parentsChild->hash == hash)
-						return parentsChild;
+	// Function which dumps the metrics added over top a base transaction
+	void debugDump() {
+		Transaction::debugDump();
+
+		std::cout << "Weight: " << ownWeight() << std::endl;
+		std::cout << "Score: " << score() << std::endl;
+		std::cout << "Cumulative weight: " << cumulativeWeight << std::endl;
+		std::cout << "Height: " << height() << std::endl;
+		std::cout << "Depth: " << depth() << std::endl;
+		std::cout << "Confidence: " << (confirmationConfidence() * 100) << "%" << std::endl;
+	}
+
+	// Function which preforms a breadth first search in an attempt to find the given node
+	TransactionNode::ptr find(Hash& hash) {
+		std::queue<TransactionNode::ptr> q;
+		q.push(shared_from_this());
+		std::list<std::string> considered;
+
+		while(!q.empty()){
+			auto head = q.front();
+			q.pop();
+			if(!head) continue;
+
+			// If the hash matches return the current head
+			if(head->hash == hash) return head;
+
+			// Add this node's children unless we have already considered them
+			for(size_t i = 0, size = head->children.read_lock()->size(); i < size; i++)
+				if(auto child = head->children.read_lock()[i]; std::find(considered.begin(), considered.end(), child->hash) == considered.end()){
+					q.push(child);
+					considered.push_back(child->hash);
 				}
 		}
 
-		// If our hash doesn't match check each child to see if it or its children contains the searched for hash
-		for(size_t i = 0; i < children.read_lock()->size(); i++){
-			auto lock = children.read_lock();
-			const TransactionNode::ptr& child = children.unsafe()[i];
-			if(auto recursiveResult = child->recursiveFind(hash); recursiveResult != nullptr)
-				return recursiveResult;
-		}
-
-		// If the hash doesn't exist in the children return a nullptr
 		return nullptr;
 	}
 
-	// Function which recursively determines if the target is a child
-	bool isChild(TransactionNode::ptr& target) const {
-		bool found = false;
-		for(size_t i = 0; i < children.read_lock()->size(); i++){
-			auto lock = children.read_lock();
-			auto& child = children.unsafe()[i];
-			// If this child is the target then it is a child of this node
-			if(child->hash == target->hash)
-				return true;
-			// Otherwise... look in the child's children
-			else found |= child->isChild(target);
-		}
-		// If none of the children or their children are the target it is not a child of this node
-		return found;
-	}
+	// Function which recursively determines if the <target> is a child
+	inline bool isChild(TransactionNode::ptr& target) const { return util::makeMutable(this)->find(target->hash) != nullptr; }
 
 	// Function which recursively prints out all of nodes in the graph
-	void recursiveDebugDump(std::list<std::string>& foundNodes, size_t depth = 0) const {
+	void recursiveDebugDump(std::list<std::string>& considered, size_t depth = 0) const {
 		// Only print out information about a node if it hasn't already been printed
-		if(std::find(foundNodes.begin(), foundNodes.end(), hash) != foundNodes.end()) return;
+		if(std::find(considered.begin(), considered.end(), hash) != considered.end()) return;
 
 		std::cout << std::left << std::setw(5) << depth << std::string(depth + 1, ' ') << hash << " children: [ ";
 		{
@@ -109,9 +104,9 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		std::cout << "]" << std::endl;
 
 		for(size_t i = 0; i < children.unsafe().size(); i++)
-			children.unsafe()[i]->recursiveDebugDump(foundNodes, depth + 1);
+			children.unsafe()[i]->recursiveDebugDump(considered, depth + 1);
 
-		foundNodes.push_back(hash);
+		considered.push_back(hash);
 	}
 
 	// Function which converts the tangle into a list
@@ -128,6 +123,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		for(size_t i = 0; i < children.read_lock()->size(); i++)
 			children.read_lock()[i]->recursivelyListTransactions(transactions);
 	}
+
 
 	// -- Consensus Functions
 
@@ -170,39 +166,35 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
 	TransactionNode::ptr biasedRandomWalk(double alpha = 5, double stepBackProb = 1/10.0) {
-		Timer t;
 		// Seed random number generator
 		CryptoPP::AutoSeededRandomPool rng;
 
-		// If we are a tip, get the shared pointer referencing us
-		if(children.read_lock()->empty())
-			return shared_from_this();
-
-		// // Have a small probability of stepping back towards the parents
-		// double stepBack = util::rand2double(rng.GenerateWord32(), rng.GenerateWord32());
-		// if(stepBack <= stepBackProb && parents.size())
-		// 	return parents[rng.GenerateWord32(0, parents.size() - 1)]->biasedRandomWalk(alpha, stepBackProb);
-
-		// Create a weighted list of children
-		std::list<std::pair<TransactionNode*, double>> weightedList;
+		// Variable that stores the generated weighted list
+		std::vector<std::pair<TransactionNode*, double>> weightedList;
+		// Variable that stores the total weight of the list
 		double totalWeight = 0;
-		for(size_t i = 0; i < children.read_lock()->size(); i++){
-			TransactionNode::ptr& child = children.read_lock()[i];
-			double weight = std::max( std::exp(-alpha * (cumulativeWeight - child->cumulativeWeight)), std::numeric_limits<double>::min() );
-			weightedList.emplace_back(child.get(), weight);
-			totalWeight += weight;
+		{
+			auto lock = children.read_lock();
+			weightedList.resize(lock->size());
+
+			// If we are a tip, get the shared pointer referencing us
+			if(lock->empty())
+				return shared_from_this();
+
+			// Create a weighted list of children
+			for(size_t i = 0; i < weightedList.size(); i++){
+				TransactionNode::ptr child = lock[i];
+				double weight = std::max( std::exp(-alpha * (cumulativeWeight - child->cumulativeWeight)), std::numeric_limits<double>::min() );
+				weightedList[i] = {child.get(), weight};
+				totalWeight += weight;
+			}
 		}
 
 		// Randomly choose a child from the weighted list
 		double random = util::rand2double(rng.GenerateWord32(), rng.GenerateWord32()) * totalWeight;
 		auto chosen = weightedList.begin();
 		for(double w = 0; w <= random && chosen != weightedList.end(); w += chosen->second)
-			if(w > 0)
-				chosen++;
-
-		// Ensure that the chosen node is valid
-		if(chosen == weightedList.end()) chosen = --weightedList.end();
-		if(!chosen->first) chosen = weightedList.begin();
+			if(w > 0) chosen++;
 
 		// Recursively walk down the chosen child
 		return chosen->first->biasedRandomWalk(alpha);
@@ -221,8 +213,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Cache our depth
 		size_t localDepth = this->depth();
 
-		// While there are still things in the queue
-		while(!q.empty()){
+		// While there are still things in the queue (and we haven't found a large enouph set)
+		while(!q.empty() && out.size() < 100){
 			// Pop the head and ensure it isn't null
 			TransactionNode::ptr& head = q.front();
 			q.pop();
@@ -251,12 +243,16 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which determines how confident the network is in a transaction
 	double confirmationConfidence() {
+		Timer t;
+		std::cout << "walk gen" << std::endl;
 		// Generate a 100 element long list of nodes to walk from
 		std::list<TransactionNode::ptr> walkList = generateWalkSet(5);
 		for(auto i = walkList.begin(); walkList.size() < 100; i++){
 			if(i == walkList.end()) i = walkList.begin();
 			walkList.push_back(*i);
 		}
+
+		std::cout << walkList.size() << std::endl;
 
 		// Count the number of random walks from the set that result in a tip that aproves this node
 		uint8_t confidence = 0;
@@ -324,7 +320,7 @@ public:
 
 	// Function which finds a node in the graph given its hash
 	TransactionNode::ptr find(Hash hash) const {
-		return genesis->recursiveFind(hash);
+		return genesis->find(hash);
 	}
 
 	// Function which performs a biased random walk on the tangle
@@ -452,7 +448,7 @@ public:
 
 	// Function which queries the balance currently associated with a given key
 	double queryBalance(const key::PublicKey& account) const {
-		std::list<std::string> foundNodes;
+		std::list<std::string> considered;
 		std::queue<TransactionNode::ptr> q;
 		double balance = 0;
 
@@ -463,7 +459,7 @@ public:
 			q.pop();
 
 			// Don't count the same transaction more than once in the balance
-			if(std::find(foundNodes.begin(), foundNodes.end(), head->hash) != foundNodes.end()) continue;
+			if(std::find(considered.begin(), considered.end(), head->hash) != considered.end()) continue;
 
 			// Add up how this transaction takes away from the balance of interest
 			for(const Transaction::Input& input: head->inputs)
@@ -483,7 +479,7 @@ public:
 			for(int i = 0; i < head->children.read_lock()->size(); i++)
 				q.push(head->children.read_lock()[i]);
 			// Mark ourselves as visited
-			foundNodes.push_back(head->hash);
+			considered.push_back(head->hash);
 		}
 
 		return balance;
@@ -493,8 +489,8 @@ public:
 	// Function which prints out the tangle
 	void debugDump() const {
 		std::cout << "Genesis: " << std::endl;
-		std::list<std::string> foundNodes;
-		genesis->recursiveDebugDump(foundNodes);
+		std::list<std::string> considered;
+		genesis->recursiveDebugDump(considered);
 	}
 
 	// Function which lists all of the transactions in the tangle

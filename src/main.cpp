@@ -263,15 +263,8 @@ int main(int argc, char* argv[]) {
 
 				// Print out the requested transaction
 				auto trx = t.find(hash);
-				if(trx){
+				if(trx)
 					trx->debugDump();
-					std::cout << "Confidence: " << (trx->confirmationConfidence() * 100) << "%" << std::endl;
-					std::cout << "Weight: " << trx->ownWeight() << std::endl;
-					std::cout << "Score: " << trx->score() << std::endl;
-					std::cout << "Cumulative weight: " << trx->cumulativeWeight << std::endl;
-					std::cout << "Height: " << trx->height() << std::endl;
-					std::cout << "Depth: " << trx->depth() << std::endl;
-				}
 			}
 			break;
 
@@ -430,6 +423,13 @@ int main(int argc, char* argv[]) {
 					if(pingingID)
 						std::cout << "Started pinging transactions" << std::endl;
 				}
+			}
+			break;
+
+		// Update the weights in the tangle
+		case 'w':
+			{
+				t.network.send_object_to_self(NetworkedTangle::UpdateWeightsRequest());
 			}
 			break;
 		}
