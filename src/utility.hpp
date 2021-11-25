@@ -5,6 +5,7 @@
 #include <string>
 #include <ostream>
 #include <istream>
+#include <unordered_set>
 #include <cryptopp/sha3.h>
 #include <cryptopp/filters.h>
 #include <cryptopp/base64.h>
@@ -62,6 +63,17 @@ namespace util {
 			out << *i << ", ";
 		out << "\b\b";
 		return out;
+	}
+
+	// Function which removes all duplicate elements from a vector
+	template<typename T>
+	void removeDuplicates(std::vector<T>& v){
+		std::unordered_set<T> s;
+		auto end = std::remove_if(v.begin(), v.end(), [&s](T const& i) {
+			return !s.insert(i).second;
+		});
+
+		v.erase(end, v.end());
 	}
 
 

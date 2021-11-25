@@ -165,7 +165,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
-	TransactionNode::ptr biasedRandomWalk(double alpha = 5, double stepBackProb = 1/10.0) {
+	TransactionNode::ptr biasedRandomWalk(double alpha = 10, double stepBackProb = 1/10.0) {
 		// Seed random number generator
 		CryptoPP::AutoSeededRandomPool rng;
 

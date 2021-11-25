@@ -1,23 +1,43 @@
 #include "tangle.hpp"
 
-// Create a transaction node, automatically mining and performing consensus on it
+#define LEFT_BEHIND_TIP_DELTA 5
+
+// Create a transaction node, automatically mining and performing (G-IOTA) consensus on it
 // NOTE: when this transaction is added to the tangle, verification of the transaction will automatically be preformed
+// NOTE: G-IOTA DOI: 10.1109/INFCOMW.2019.8845163
 TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::vector<Transaction::Input>& inputs, const std::vector<Transaction::Output>& outputs, uint8_t difficulty /*= 3*/){
 	// Select two different (unless there is only 1) tips at random
-	auto tip1 = t.biasedRandomWalk();
-	auto tip2 = t.biasedRandomWalk();
+	std::vector<TransactionNode::ptr> parents;
+	parents.push_back(t.biasedRandomWalk()); // Tip1 = front
+	parents.push_back(t.biasedRandomWalk()); // Tip2 = back
 	// 256 tries to find a different tip before giving up
 	for(auto [counter, tipCount] = std::make_pair(uint8_t(1), t.tips.read_lock()->size());
-	  tipCount > 1 && tip1 == tip2 && counter != 0; counter++)
-		tip2 = t.biasedRandomWalk();
+	  tipCount > 1 && parents.front() == parents.back() && counter != 0; counter++)
+		parents.back() = t.biasedRandomWalk();
 
-	if(!tip1 || !tip2) throw std::runtime_error("Failed to find a tip!");
+	if(!parents.front() || !parents.back()) throw std::runtime_error("Failed to find a tip!");
 
-	// Create the transaction
-	TransactionNode::ptr trx;
-	if(tip1 != tip2) trx = TransactionNode::create({tip1, tip2}, inputs, outputs, difficulty);
-	else trx = TransactionNode::create({tip1}, inputs, outputs, difficulty);
-	// Mine the transaction
+	// Calculate the (truncated) average height of our chosen parents
+	size_t avgHeight = 0;
+	for(auto& parent: parents)
+		avgHeight += parent->height();
+	avgHeight /= parents.size();
+
+	{
+		// If we can find a tip whoes height (longest path to genesis) qualifies it as left behind, also add it as a parent
+		auto tipLock = t.tips.read_lock();
+		for(int i = 0; i < tipLock->size(); i++)
+			if(tipLock[i]->height() <= avgHeight - LEFT_BEHIND_TIP_DELTA){
+				parents.push_back(tipLock[i]);
+				break;
+			}
+	}
+
+	// Ensure that each node only appears once in the list of parents
+	util::removeDuplicates(parents);
+
+	// Create and mine the transaction
+	TransactionNode::ptr trx = TransactionNode::create(parents, inputs, outputs, difficulty);
 	trx->mineTransaction();
 	return trx;
 }
