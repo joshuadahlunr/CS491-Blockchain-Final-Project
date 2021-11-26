@@ -77,6 +77,15 @@ namespace key {
 		return out;
 	}
 
+	// Function which converts a string to base 64 string
+	std::string saveBase64(const PublicKey& key){
+		auto decoded = save(key);
+		std::string encoded;
+
+		CryptoPP::VectorSource ss(decoded, true, new CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded)) );
+		return encoded;
+	}
+
 	// Function which converts a keypair to a byte array
 	std::vector<Byte> save(const PrivateKey& pri, const PublicKey& pub) {
 		std::vector<Byte> out = save(pri);
@@ -100,6 +109,13 @@ namespace key {
 		return key;
 	}
 
+	// Function which loads a public key from a base 64 string
+	PublicKey loadPublicBase64(const std::string& encoded){
+		std::vector<Byte> decoded;
+		CryptoPP::StringSource ss(encoded, true, new CryptoPP::Base64Decoder(new CryptoPP::VectorSink(decoded)));
+
+		return loadPublic(decoded);
+	}
 
 	// Function which signs the provided message
 	std::string signMessage(const PrivateKey& key, const std::string& message) {

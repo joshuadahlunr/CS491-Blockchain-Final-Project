@@ -35,6 +35,7 @@ namespace key {
 	// Functions which convert keys to byte arrays
 	std::vector<Byte> save(const PrivateKey& key);
 	std::vector<Byte> save(const PublicKey& key);
+	std::string saveBase64(const PublicKey& key);
 	std::vector<Byte> save(const PrivateKey& pri, const PublicKey& pub);
 	inline std::vector<Byte> save(const KeyPair& pair) { return save(pair.pri, pair.pub); }
 
@@ -45,16 +46,17 @@ namespace key {
 	// Functions which convert byte arrays to keys
 	PrivateKey loadPrivate(CryptoPP::VectorSource& source);
 	inline PrivateKey loadPrivate(CryptoPP::VectorSource&& source) { return loadPrivate(source); }
-	inline PrivateKey loadPrivate(std::vector<Byte>& source) { return loadPrivate({source, true}); }
-	inline PrivateKey loadPrivate(std::vector<Byte>&& source) { return loadPrivate({source, true}); }
+	inline PrivateKey loadPrivate(const std::vector<Byte>& source) { return loadPrivate({source, true}); }
+	inline PrivateKey loadPrivate(const std::vector<Byte>&& source) { return loadPrivate({source, true}); }
 	PublicKey loadPublic(CryptoPP::VectorSource& source);
+	PublicKey loadPublicBase64(const std::string& source);
 	inline PublicKey loadPublic(CryptoPP::VectorSource&& source) { return loadPublic(source); }
-	inline PublicKey loadPublic(std::vector<Byte>& source) { return loadPublic({source, true}); }
-	inline PublicKey loadPublic(std::vector<Byte>&& source) { return loadPublic({source, true}); }
+	inline PublicKey loadPublic(const std::vector<Byte>& source) { return loadPublic({source, true}); }
+	inline PublicKey loadPublic(const std::vector<Byte>&& source) { return loadPublic({source, true}); }
 	inline KeyPair load(CryptoPP::VectorSource& source) { return { loadPrivate(source), loadPublic(source) }; }
 	inline KeyPair load(CryptoPP::VectorSource&& source) { return { loadPrivate(source), loadPublic(source) }; }
-	inline KeyPair load(std::vector<Byte>& source) { return load({source, true}); }
-	inline KeyPair load(std::vector<Byte>&& source) { return load({source, true}); }
+	inline KeyPair load(const std::vector<Byte>& source) { return load({source, true}); }
+	inline KeyPair load(const std::vector<Byte>&& source) { return load({source, true}); }
 
 	// Function which signs a message
 	std::string signMessage(const PrivateKey& key, const std::string& message);

@@ -41,19 +41,26 @@ struct Transaction {
 
 	// A transaction output is an account and an amount to assign to that account
 	struct Output {
-		key::PublicKey account;
+		friend breep::serializer& operator<<(breep::serializer& s, const Transaction& t);
+		friend breep::deserializer& operator>>(breep::deserializer& d, Transaction& t);
+	protected:
+		std::string _accountBase64;
+	public:
+		key::PublicKey account() const { return key::loadPublicBase64(_accountBase64); }
 		double amount;
+
 
 		Hash hashContribution() const {
 			std::stringstream contrib;
-			contrib << util::bytes2string( key::save(account) );
+			contrib << _accountBase64;
 			contrib << amount;
 			return contrib.str();
 		}
 
 		Output() = default;
-		Output(const key::KeyPair& pair, const double amount) : account(pair.pub), amount(amount) {}
-		Output(key::PublicKey account, double amount) : account(account), amount(amount) {}
+		Output(const key::KeyPair& pair, const double amount) : _accountBase64( key::saveBase64(pair.pub) ), amount(amount) {}
+		Output(const key::PublicKey& account, double amount) : _accountBase64( key::saveBase64(account) ), amount(amount) {}
+		Output(const key::PublicKey&& account, double amount) : Output(account, amount) {}
 	};
 
 	// A transaction input is an account, amount to take from that account, and a signed copy of the amount verifying that the sender aproves of the transaction
@@ -62,15 +69,16 @@ struct Transaction {
 
 		Hash hashContribution() const {
 			std::stringstream contrib;
-			contrib << util::bytes2string( key::save(account) );
+			contrib << _accountBase64;
 			contrib << amount;
 			contrib << signature;
 			return contrib.str();
 		}
 
 		Input() = default;
-		Input(const key::KeyPair& pair, const double amount) : Output{pair.pub, amount}, signature( key::signMessage(pair.pri, std::to_string(amount))) {}
-		Input(key::PublicKey account, double amount, std::string signature) : Output{account, amount}, signature(signature) {}
+		Input(const key::KeyPair& pair, const double amount) : Output(pair, amount), signature( key::signMessage(pair.pri, std::to_string(amount))) {}
+		Input(const key::PublicKey& account, double amount, std::string signature) : Output(account, amount), signature(signature) {}
+		Input(const key::PublicKey&& account, double amount, std::string signature) : Output(account, amount), signature(signature) {}
 	};
 
 	const std::vector<Input> inputs = {};
@@ -98,7 +106,7 @@ struct Transaction {
 		// Hash everything stored
 		hash(hashTransaction()) {}
 
-	Transaction(Transaction& other) : timestamp(other.timestamp), inputs(other.inputs), outputs(other.outputs), parentHashes(other.parentHashes), hash(other.hash) { *this = other; }
+	Transaction(const Transaction& other) : timestamp(other.timestamp), inputs(other.inputs), outputs(other.outputs), parentHashes(other.parentHashes), hash(other.hash) { *this = other; }
 
 	~Transaction(){
 		// Clean up the parent hashes so that we don't have a memory leak
@@ -158,11 +166,11 @@ struct Transaction {
 
 		std::cout << "Inputs: [" << std::endl;
 		for(auto& i: inputs)
-			std::cout << "\t Account: " << key::hash(i.account) << ", Amount: " << i.amount << std::endl;
+			std::cout << "\t Account: " << key::hash(i.account()) << ", Amount: " << i.amount << std::endl;
 		std::cout << "]" << std::endl
 			<< "Outputs: [" << std::endl;
 		for(auto& o: outputs)
-			std::cout << "\t Account: " << key::hash(o.account) << ", Amount: " << o.amount << std::endl;
+			std::cout << "\t Account: " << key::hash(o.account()) << ", Amount: " << o.amount << std::endl;
 		std::cout << "]" << std::endl;
 	}
 
@@ -205,7 +213,7 @@ struct Transaction {
 
 		// Make sure all of the inputs agreed to their contribution
 		for(const Input& input: inputs)
-			good &= key::verifyMessage(input.account, std::to_string(input.amount), input.signature);
+			good &= key::verifyMessage(input.account(), std::to_string(input.amount), input.signature);
 
 		return good;
 	}
@@ -240,14 +248,14 @@ inline breep::serializer& operator<<(breep::serializer& s, const Transaction& t)
 
 	s << t.inputs.size();
 	for(const Transaction::Input& input: t.inputs){
-		s << input.account;
+		s << input._accountBase64;
 		s << input.amount;
 		s << input.signature;
 	}
 
 	s << t.outputs.size();
 	for(const Transaction::Output& output: t.outputs){
-		s << output.account;
+		s << output._accountBase64;
 		s << output.amount;
 	}
 
@@ -279,7 +287,7 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 	d >> inputsSize;
 	inputs.resize(inputsSize);
 	for(int i = 0; i < inputsSize; i++){
-		d >> inputs[i].account;
+		d >> inputs[i]._accountBase64;
 		d >> inputs[i].amount;
 		d >> inputs[i].signature;
 	}
@@ -287,7 +295,7 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 	d >> outputsSize;
 	outputs.resize(outputsSize);
 	for(int i = 0; i < outputsSize; i++){
-		d >> outputs[i].account;
+		d >> outputs[i]._accountBase64;
 		d >> outputs[i].amount;
 	}
 

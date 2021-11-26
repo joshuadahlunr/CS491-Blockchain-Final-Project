@@ -333,6 +333,7 @@ public:
 		// Validate that the inputs to this transaction do not cause their owner's balance to go into the negatives
 		std::vector<std::pair<key::PublicKey, double>> balanceMap; // List acting as a bootleg map of keys to balances
 		for(const Transaction::Input& input: node->inputs){
+			auto inputAccount = input.account();
 			// The account's balance is invalid
 			double balance = -1;
 
@@ -340,22 +341,22 @@ public:
 			int i = 0;
 			for(auto& [account, bal]: balanceMap){
 				i++;
-				if(account == input.account){
+				if(account == inputAccount){
 					balance = bal;
 					break;
 				}
 			}
 			// Otherwise... query its balance
-			if(balance < 0) balance = queryBalance(input.account);
+			if(balance < 0) balance = queryBalance(inputAccount);
 
 			// Subtace the input from the balance and ensure it doesn't cause the transaction to go into the negatives
 			balance -= input.amount;
 			if(balance < 0)
-				throw InvalidBalance(node, input.account, balance);
+				throw InvalidBalance(node, inputAccount, balance);
 
 			// Cache the balance (adding to the list if not already present)
 			if(i == balanceMap.size())
-				balanceMap.emplace_back(input.account, balance);
+				balanceMap.emplace_back(inputAccount, balance);
 			else balanceMap[i].second = balance;
 		}
 
@@ -450,7 +451,7 @@ public:
 
 			// Add up how this transaction takes away from the balance of interest
 			for(const Transaction::Input& input: head->inputs)
-				if(input.account == account)
+				if(input.account() == account)
 					balance -= input.amount;
 			// If the balance becomes negative except
 			if(balance < 0)
@@ -458,7 +459,7 @@ public:
 
 			// Add up how this transaction adds to the balance of interest
 			for(const Transaction::Output& output: head->outputs)
-				if(output.account == account)
+				if(output.account() == account)
 					balance += output.amount;
 			// If the balance becomes negative except
 			if(balance < 0)
