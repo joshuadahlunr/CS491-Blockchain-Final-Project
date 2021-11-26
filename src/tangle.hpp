@@ -203,28 +203,39 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which determines how confident the network is in a transaction
 	float confirmationConfidence() {
-		// Generates a list of all parents going 5 levels deep (if able)
-		auto generateWalkSet = [this](){
-			std::list<TransactionNode::ptr> out;
-			for(auto parent: parents) {
-				out.push_back(parent);
-				for(auto parent2: parent->parents){
-					out.push_back(parent2);
-					for(auto parent3: parent2->parents){
-						out.push_back(parent3);
-						for(auto parent4: parent3->parents){
-							out.push_back(parent4);
-							for(auto parent5: parent4->parents)
-								out.push_back(parent5);
-						}
-					}
-				}
+		// Generates a list of all parents going <levels> deep (if able)
+		auto generateWalkSet = [this](size_t levels = 5) -> std::list<TransactionNode::ptr>{
+			auto self = shared_from_this();
+
+			std::unordered_set<TransactionNode::ptr> set;
+			{
+				auto childLock = children.read_lock();
+				for(size_t i = 0; i < childLock->size(); i++)
+					set.insert(childLock[i]);
+				if(set.empty()) set.insert(self); // Add us to the set if we have no children
+				else levels++; // Otherwise add one to levels to compensate for starting at level -1
+
+				// For each level deep we are going...
+				for(int i = 0; i < levels; i++)
+					// For each node in the set...
+					for(auto& node: set)
+						// Add its parents to the set
+						if(!node->isGenesis)
+							for(auto& parent: node->parents)
+								set.insert(parent);
+
+				// Remove our children from the set
+				for(size_t i = 0; i < childLock->size(); i++)
+					set.erase(childLock[i]);
 			}
-			return out;
+			// Remove ourself from the set
+			set.erase(self);
+
+			return { set.begin(), set.end() };
 		};
 
 		// Merges two lists together
-		auto merge = [](std::list<TransactionNode::ptr>& a, std::list<TransactionNode::ptr> b){ // The second is a copy so that we duplicate the size of the list
+		auto merge = [](std::list<TransactionNode::ptr>& a, std::list<TransactionNode::ptr> b){ // The second is a copy so that we duplicate the state of the list
 			a.insert(a.begin(), b.begin(), b.end());
 		};
 
