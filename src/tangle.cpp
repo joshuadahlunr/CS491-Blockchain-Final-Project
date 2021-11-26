@@ -7,7 +7,7 @@
 // NOTE: G-IOTA DOI: 10.1109/INFCOMW.2019.8845163
 TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::vector<Transaction::Input>& inputs, const std::vector<Transaction::Output>& outputs, uint8_t difficulty /*= 3*/){
 	// Select two different (unless there is only 1) tips at random
-	std::vector<TransactionNode::ptr> parents;
+	std::vector<TransactionNode::const_ptr> parents;
 	parents.push_back(t.biasedRandomWalk()); // Tip1 = front
 	parents.push_back(t.biasedRandomWalk()); // Tip2 = back
 	// 256 tries to find a different tip before giving up
@@ -23,15 +23,12 @@ TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::
 		avgHeight += parent->height();
 	avgHeight /= parents.size();
 
-	{
-		// If we can find a tip whoes height (longest path to genesis) qualifies it as left behind, also add it as a parent
-		auto tipLock = t.tips.read_lock();
-		for(int i = 0; i < tipLock->size(); i++)
-			if(tipLock[i]->height() <= avgHeight - LEFT_BEHIND_TIP_DELTA){
-				parents.push_back(tipLock[i]);
-				break;
-			}
-	}
+	// If we can find a tip whoes height (longest path to genesis) qualifies it as left behind, also add it as a parent
+	for(auto [i, tipLock] = std::make_pair(size_t(0), util::makeMutable(t.tips).read_lock()); i < tipLock->size(); i++)
+		if(tipLock[i]->height() <= avgHeight - LEFT_BEHIND_TIP_DELTA){
+			parents.push_back(tipLock[i]);
+			break;
+		}
 
 	// Ensure that each node only appears once in the list of parents
 	util::removeDuplicates(parents);
@@ -44,9 +41,9 @@ TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::
 
 // Function which converts a transaction into a transaction node
 TransactionNode::ptr TransactionNode::create(const Tangle& t, const Transaction& trx) {
-	std::vector<TransactionNode::ptr> parents;
+	std::vector<TransactionNode::const_ptr> parents;
 	for(Hash& hash: trx.parentHashes)
-		if(TransactionNode::ptr parent = t.find(hash); parent)
+		if(TransactionNode::const_ptr parent = t.find(hash); parent)
 			parents.push_back(parent);
 		else throw Tangle::NodeNotFoundException(hash);
 

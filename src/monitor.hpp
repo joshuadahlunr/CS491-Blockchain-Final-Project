@@ -40,9 +40,9 @@ public:
 		std::shared_lock<std::shared_timed_mutex> sharedLock;
 	};
 
-	// Call a function or access a member of the base type directly (automatic write lock)
-    monitor_helper_unique operator->() { return monitor_helper_unique(this); }
-	const monitor_helper_unique operator->() const { return monitor_helper_unique(this); }
+	// Call a function or access a member of the base type directly
+    monitor_helper_unique operator->() { return monitor_helper_unique(this); } // If we might change the data return a write lock
+	const monitor_helper_shared operator->() const { return monitor_helper_shared(this); } // If we can't change the data return a read lock
 	// Return a write locked pointer to the underlying data
     monitor_helper_unique write_lock() { return monitor_helper_unique(this); }
 	const monitor_helper_unique write_lock() const { return monitor_helper_unique(this); }

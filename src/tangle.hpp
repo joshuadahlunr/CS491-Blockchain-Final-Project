@@ -19,28 +19,29 @@ struct Tangle;
 struct TransactionNode : public Transaction, public std::enable_shared_from_this<TransactionNode> {
 	// Smart pointer type of the node
 	using ptr = std::shared_ptr<TransactionNode>;
+	using const_ptr = std::shared_ptr<const TransactionNode>;
 
 	// Variable tracking the cumulative weight of this node
 	const float cumulativeWeight = 0;
 	// Variable tracking weather or not this transaction is the genesis transaction
 	const bool isGenesis = false; // TODO: should this go in the base transaction or here?
 	// Immutable list of parents of the node
-	const std::vector<TransactionNode::ptr> parents;
+	const std::vector<TransactionNode::const_ptr> parents;
 	// List of children of the node
 	monitor<std::vector<TransactionNode::ptr>> children;
 
 
-	TransactionNode(const std::vector<TransactionNode::ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) :
+	TransactionNode(const std::vector<TransactionNode::const_ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) :
 		// Construct the base transaction with the hashes of the parent nodes
-		Transaction([](const std::vector<TransactionNode::ptr>& parents) -> std::vector<std::string> {
+		Transaction([](const std::vector<TransactionNode::const_ptr>& parents) -> std::vector<std::string> {
 			std::vector<std::string> out;
-			for(const TransactionNode::ptr& p: parents)
+			for(const TransactionNode::const_ptr& p: parents)
 				out.push_back(p->hash);
 			return out;
 		}(parents), inputs, outputs, difficulty), parents(parents) { }
 
 	// Function which creates a node ptr
-	static TransactionNode::ptr create(const std::vector<TransactionNode::ptr> parents, std::vector<Input> inputs, std::vector<Output> outputs, uint8_t difficulty = 3) {
+	static TransactionNode::ptr create(const std::vector<TransactionNode::const_ptr>& parents, std::vector<Input> inputs, std::vector<Output> outputs, uint8_t difficulty = 3) {
 		return std::make_shared<TransactionNode>(parents, inputs, outputs, difficulty);
 	}
 
@@ -63,6 +64,30 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which preforms a breadth first search in an attempt to find the given node
+	TransactionNode::const_ptr find(Hash& hash) const {
+		std::queue<TransactionNode::const_ptr> q;
+		q.push(shared_from_this());
+		std::list<std::string> considered;
+
+		while(!q.empty()){
+			auto head = q.front();
+			q.pop();
+			if(!head) continue;
+
+			// If the hash matches return the current head
+			if(head->hash == hash) return head;
+
+			// Add this node's children unless we have already considered them
+			auto lock = head->children.read_lock();
+			for(size_t i = 0, size = lock->size(); i < size; i++)
+				if(auto child = lock[i]; std::find(considered.begin(), considered.end(), child->hash) == considered.end()){
+					q.push(child);
+					considered.push_back(child->hash);
+				}
+		}
+
+		return nullptr;
+	}
 	TransactionNode::ptr find(Hash& hash) {
 		std::queue<TransactionNode::ptr> q;
 		q.push(shared_from_this());
@@ -77,8 +102,9 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 			if(head->hash == hash) return head;
 
 			// Add this node's children unless we have already considered them
-			for(size_t i = 0, size = head->children.read_lock()->size(); i < size; i++)
-				if(auto child = head->children.read_lock()[i]; std::find(considered.begin(), considered.end(), child->hash) == considered.end()){
+			auto lock = head->children.read_lock();
+			for(size_t i = 0, size = lock->size(); i < size; i++)
+				if(auto child = lock[i]; std::find(considered.begin(), considered.end(), child->hash) == considered.end()){
 					q.push(child);
 					considered.push_back(child->hash);
 				}
@@ -88,7 +114,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which recursively determines if the <target> is a child
-	inline bool isChild(TransactionNode::ptr& target) const { return util::makeMutable(this)->find(target->hash) != nullptr; }
+	inline bool isChild(TransactionNode::const_ptr& target) const { return util::makeMutable(this)->find(target->hash) != nullptr; }
 
 	// Function which recursively prints out all of nodes in the graph
 	void recursiveDebugDump(std::list<std::string>& considered, size_t depth = 0) const {
@@ -136,8 +162,8 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		if(isGenesis) return ownWeight();
 
 		float sum = ownWeight();
-		for(const TransactionNode::ptr& parent: parents)
-			sum += parent->score();
+		for(size_t i = 0; i < parents.size(); i++)
+			sum += parents[i]->score();
 
 		return sum;
 	}
@@ -155,39 +181,38 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 	// Function which calculates the depth (longest path to tip) of the transaction
 	size_t depth() const {
-		if(children.read_lock()->empty()) return 0;
+		auto childLock = children.read_lock();
+		if(childLock->empty()) return 0;
 
 		size_t max = 0;
-		for(size_t i = 0; i < children.read_lock()->size(); i++)
-			max = std::max(children.read_lock()[i]->depth(), max);
+		for(size_t i = 0; i < childLock->size(); i++)
+			max = std::max(childLock[i]->depth(), max);
 
 		return max + 1;
 	}
 
 	// Function which performs a biased random walk starting from the current node, and returns the tip it discovers
-	TransactionNode::ptr biasedRandomWalk(double alpha = 10, double stepBackProb = 1/10.0) {
+	TransactionNode::const_ptr biasedRandomWalk(double alpha = 10, double stepBackProb = 1/10.0) const {
 		// Seed random number generator
 		CryptoPP::AutoSeededRandomPool rng;
+		// (Read) Lock our children
+		auto lock = children.read_lock();
+
+		// If we are a tip, get the shared pointer referencing us
+		if(lock->empty())
+			return shared_from_this();
 
 		// Variable that stores the generated weighted list
-		std::vector<std::pair<TransactionNode*, double>> weightedList;
+		std::vector<std::pair<TransactionNode::const_ptr, double>> weightedList(lock->size());
 		// Variable that stores the total weight of the list
 		double totalWeight = 0;
-		{
-			auto lock = children.read_lock();
-			weightedList.resize(lock->size());
 
-			// If we are a tip, get the shared pointer referencing us
-			if(lock->empty())
-				return shared_from_this();
-
-			// Create a weighted list of children
-			for(size_t i = 0; i < weightedList.size(); i++){
-				TransactionNode::ptr child = lock[i];
-				double weight = std::max( std::exp(-alpha * (cumulativeWeight - child->cumulativeWeight)), std::numeric_limits<double>::min() );
-				weightedList[i] = {child.get(), weight};
-				totalWeight += weight;
-			}
+		// Create a weighted list of children
+		for(size_t i = 0; i < weightedList.size(); i++){
+			TransactionNode::const_ptr child = lock[i];
+			double weight = std::max( std::exp(-alpha * (cumulativeWeight - child->cumulativeWeight)), std::numeric_limits<double>::min() );
+			weightedList[i] = {child, weight};
+			totalWeight += weight;
 		}
 
 		// Randomly choose a child from the weighted list
@@ -202,12 +227,12 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 
 	// Function which determines how confident the network is in a transaction
-	float confirmationConfidence() {
+	float confirmationConfidence() const {
 		// Generates a list of all parents going <levels> deep (if able)
-		auto generateWalkSet = [this](size_t levels = 5) -> std::list<TransactionNode::ptr>{
+		auto generateWalkSet = [this](size_t levels = 5) -> std::list<TransactionNode::const_ptr>{
 			auto self = shared_from_this();
 
-			std::unordered_set<TransactionNode::ptr> set;
+			std::unordered_set<TransactionNode::const_ptr> set;
 			{
 				auto childLock = children.read_lock();
 				for(size_t i = 0; i < childLock->size(); i++)
@@ -235,19 +260,19 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		};
 
 		// Merges two lists together
-		auto merge = [](std::list<TransactionNode::ptr>& a, std::list<TransactionNode::ptr> b){ // The second is a copy so that we duplicate the state of the list
+		auto merge = [](std::list<TransactionNode::const_ptr>& a, std::list<TransactionNode::const_ptr> b){ // The second is a copy so that we duplicate the state of the list
 			a.insert(a.begin(), b.begin(), b.end());
 		};
 
 		// Generate an at least 100 element long list of nodes to walk from
-		std::list<TransactionNode::ptr> walkList = generateWalkSet();
+		std::list<TransactionNode::const_ptr> walkList = generateWalkSet();
 		while(walkList.size() < 100)
 			merge(walkList, walkList);
 
 
 		// Count the number of random walks from the set that result in a tip that aproves this node
 		uint8_t confidence = 0;
-		for(TransactionNode::ptr base: walkList){
+		for(TransactionNode::const_ptr base: walkList){
 			if(auto tip = base->biasedRandomWalk(0); tip && isChild(tip))
 				confidence++;
 		}
@@ -271,7 +296,7 @@ struct Tangle {
 	// Pointer to the Genesis block
 	const TransactionNode::ptr genesis;
 	// List of tips
-	const monitor<std::vector<TransactionNode::ptr>> tips;
+	const monitor<std::vector<TransactionNode::const_ptr>> tips;
 
 protected:
 	// Mutex used to synchronize modifications across threads
@@ -284,7 +309,7 @@ public:
 
 	// Upon creation generate a genesis block
 	Tangle() : genesis([]() -> TransactionNode::ptr {
-		std::vector<TransactionNode::ptr> parents;
+		std::vector<TransactionNode::const_ptr> parents;
 		std::vector<Transaction::Input> inputs;
 		std::vector<Transaction::Output> outputs;
 		return std::make_shared<TransactionNode>(parents, inputs, outputs);
@@ -300,21 +325,20 @@ public:
 
 		// Free the memory for every child of the old genesis (if it exists)
 		if(this->genesis)
-			while(!this->genesis->children.read_lock()->empty())
-				for(size_t i = 0, size = tips.read_lock()->size(); i < size; i++)
-					removeTip(util::makeMutable(tips.unsafe())[0]);
+			for(auto lock = this->genesis->children.read_lock(); !lock->empty(); )
+				for(auto [i, tipsLock] = std::make_pair(size_t(0), util::makeMutable(tips).read_lock()); i < tipsLock->size(); i++)
+					removeTip(tipsLock[0]);
 
 		// Update the genesis
 		util::makeMutable(this->genesis) = genesis;
 	}
 
 	// Function which finds a node in the graph given its hash
-	TransactionNode::ptr find(Hash hash) const {
-		return genesis->find(hash);
-	}
+	TransactionNode::const_ptr find(Hash hash) const { return genesis->find(hash); }
+	TransactionNode::ptr find(Hash hash) { return genesis->find(hash); }
 
 	// Function which performs a biased random walk on the tangle
-	TransactionNode::ptr biasedRandomWalk() const {
+	TransactionNode::const_ptr biasedRandomWalk() const {
 		return genesis->biasedRandomWalk();
 	}
 
@@ -362,7 +386,7 @@ public:
 
 
 		// For each parent of the new node... preform error validation
-		for(const TransactionNode::ptr& parent: node->parents) {
+		for(const TransactionNode::const_ptr& parent: node->parents) {
 			// Make sure the parent is in the graph
 			if(!find(parent->hash))
 				throw NodeNotFoundException(parent->hash);
@@ -378,13 +402,13 @@ public:
 
 			// For each parent of the new node...
 			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
-			for(const TransactionNode::ptr& parent: node->parents){
+			for(const TransactionNode::const_ptr& parent: node->parents){
 				// Remove the parent from the list of tips
 				auto tipsLock = tips.write_lock();
 				std::erase(*tipsLock, parent);
 
 				// Add the node as a child of that parent
-				parent->children->push_back(node);
+				find(parent->hash)->children->push_back(node);
 				// Add the node to the list of tips
 				tipsLock->push_back(node);
 			}
@@ -400,7 +424,7 @@ public:
 	}
 
 	// Function which removes a node from the graph (can only remove tips, nodes with no children)
-	void removeTip(TransactionNode::ptr node){
+	void removeTip(TransactionNode::const_ptr node){
 		// Make sure the pointer is valid
 		if(!node) return;
 
@@ -498,10 +522,10 @@ public:
 	}
 
 protected:
-	void updateCumulativeWeights(TransactionNode::ptr source){
+	void updateCumulativeWeights(TransactionNode::const_ptr source){
 
 		// TODO: can these locks be removed since we are behind the add mutex?
-		std::queue<TransactionNode::ptr> q;
+		std::queue<TransactionNode::const_ptr> q;
 		q.push(source);
 
 		while(!q.empty()){

@@ -348,8 +348,8 @@ public:
 		static void listener(breep::tcp::netdata_wrapper<UpdateWeightsRequest>& networkData, NetworkedTangle& t){
 			// Update all the weights
 			std::thread([&t](){
-				for(size_t i = 0, size = t.tips.read_lock()->size(); i < size; i++)
-					t.updateCumulativeWeights(t.tips.read_lock()[i]);
+				for(auto [i, tipLock] = std::make_pair(size_t(0), util::makeMutable(t.tips).read_lock()); i < tipLock->size(); i++)
+					t.updateCumulativeWeights(tipLock[i]);
 			}).detach();
 
 			std::cout << "Started updating tangle weights" << std::endl;
@@ -478,7 +478,7 @@ public:
 					(*(Tangle*) &t).add(TransactionNode::create(t, transaction)); // Call the tangle version so that we don't spam the network with extra messages
 					std::cout << "Added remote transaction with hash `" + transaction.hash + "` to the tangle" << std::endl;
 				}
-			} catch (...) { std::cerr << "Invalid transaction in network queue, discarding" << std::endl; }
+			} catch (std::exception& e) { std::cerr << "Invalid transaction in network queue, discarding" << std::endl << "\t" << e.what() << std::endl; }
 		}
 	};
 

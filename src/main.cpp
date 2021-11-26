@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
 		std::shared_ptr<key::KeyPair> networkKeys = std::make_shared<key::KeyPair>(key::generateKeyPair(CryptoPP::ASN1::secp160r1()));
 
 		// Create a genesis which gives the network key "infinate" money
-		std::vector<TransactionNode::ptr> parents;
+		std::vector<TransactionNode::const_ptr> parents;
 		std::vector<Transaction::Input> inputs;
 		std::vector<Transaction::Output> outputs;
 		outputs.push_back({networkKeys->pub, std::numeric_limits<double>::max()});
