@@ -198,6 +198,7 @@ int main(int argc, char* argv[]) {
 
 
 	breep::listener_id pingingID = 0;
+	std::atomic<size_t> pingingThreads = 0;
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
 		switch(cmd){
@@ -385,39 +386,43 @@ int main(int argc, char* argv[]) {
 						std::cout << "Stopped pinging transactions" << std::endl;
 					}
 				} else {
-					pingingID = network->add_data_listener<NetworkedTangle::AddTransactionRequest>([&t] (breep::tcp::netdata_wrapper<NetworkedTangle::AddTransactionRequest>& dw) -> void {
+					pingingID = network->add_data_listener<NetworkedTangle::AddTransactionRequest>([&t, &pingingThreads] (breep::tcp::netdata_wrapper<NetworkedTangle::AddTransactionRequest>& dw) -> void {
 						double recieved = 0;
 						for(const Transaction::Output& output: dw.data.transaction.outputs)
 							recieved += output.amount;
 
-						std::thread([&t, recieved, hash = dw.data.transaction.hash](){
-							std::this_thread::sleep_for(std::chrono::milliseconds(500));
+						// Only allow there to be 1 active pinging threads
+						if(pingingThreads < 1)
+							std::thread([&t, &pingingThreads, recieved, hash = dw.data.transaction.hash](){
+								pingingThreads++;
+								std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-							// Check that the transaction was approved
-							if(t.find(hash) && network->peers().size()){
-								size_t id = rand() % network->peers().size();
-								auto chosen = network->peers().begin();
-								for(int i = 0; i < id; i++) chosen++;
+								// Check that the transaction was approved
+								if(t.find(hash) && network->peers().size()){
+									size_t id = rand() % network->peers().size();
+									auto chosen = network->peers().begin();
+									for(int i = 0; i < id; i++) chosen++;
 
-								auto account = t.peerKeys[chosen->second.id()];
+									auto account = t.peerKeys[chosen->second.id()];
 
-								try{
-									// Create transaction inputs and outputs
-									std::vector<Transaction::Input> inputs;
-									inputs.emplace_back(*t.personalKeys, recieved);
-									std::vector<Transaction::Output> outputs;
-									outputs.emplace_back(account, recieved);
+									try{
+										// Create transaction inputs and outputs
+										std::vector<Transaction::Input> inputs;
+										inputs.emplace_back(*t.personalKeys, recieved);
+										std::vector<Transaction::Output> outputs;
+										outputs.emplace_back(account, recieved);
 
-									// Create, mine, and add the transaction
-									std::cout << "Sending " << recieved << " money to " << key::hash(account) << std::endl;
-									t.add(TransactionNode::createAndMine(t, inputs, outputs, /*difficulty*/ 2));
-								} catch (Tangle::InvalidBalance ib) {
-									std::cerr << ib.what() << " Discarding transaction!" << std::endl;
-								} catch (NetworkedTangle::InvalidAccount ia) {
-									std::cerr << ia.what() << " Discarding transaction!" << std::endl;
+										// Create, mine, and add the transaction
+										std::cout << "Pinging " << recieved << " money"/*to " << key::hash(account)*/ << std::endl;
+										t.add(TransactionNode::createAndMine(t, inputs, outputs, /*difficulty*/ 3));
+									} catch (Tangle::InvalidBalance ib) {
+										std::cerr << ib.what() << " Discarding transaction!" << std::endl;
+									} catch (NetworkedTangle::InvalidAccount ia) {
+										std::cerr << ia.what() << " Discarding transaction!" << std::endl;
+									}
 								}
-							}
-						}).detach();
+								pingingThreads--;
+							}).detach();
 					}).id();
 
 					if(pingingID)
