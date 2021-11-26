@@ -7,6 +7,7 @@
 #include <list>
 #include <ostream>
 #include <istream>
+#include "circular_buffer.hpp"
 
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <boost/uuid/uuid_io.hpp>
@@ -15,6 +16,15 @@
 
 // The default port to start searching for ports at
 #define DEFAULT_PORT_NUMBER 12345;
+
+// Extension to a std::queue which allows modification of its container
+template<typename T, typename Container = std::deque<T>>
+struct ModifiableQueue: public std::queue<T, Container> {
+	using Base = std::queue<T, Container>;
+	using Base::Base;
+
+	Container& getContainer() { return Base::c; }
+};
 
 // Function which attempts to remotely read data from a sodket until the <timeout> amount of time has elapsed
 // Returns true if the read was successful, false otherwise
@@ -83,6 +93,9 @@ struct NetworkedTangle: public Tangle {
 	std::unordered_map<boost::uuids::uuid, key::PublicKey, boost::hash<boost::uuids::uuid>> peerKeys;
 
 	NetworkedTangle(breep::tcp::network& network) : network(network) {
+		// Make sure that the network queue has some memory backing it
+		networkQueue.getContainer().resize(NETWORK_QUEUE_MIN_SIZE);
+
 		// Listen to dis/connection events
 		auto connect_disconnectListenerClosure = [this] (breep::tcp::network& network, const breep::tcp::peer& peer) -> void {
 			this->connect_disconnectListener(network, peer);
@@ -208,8 +221,34 @@ private:
 	struct TransactionAndHashVerificationPair {
 		Transaction transaction;
 		HashVerificationPair pair;
+
+		TransactionAndHashVerificationPair() = default;
+		TransactionAndHashVerificationPair(const Transaction& transaction, const HashVerificationPair& pair) : transaction(transaction), pair(pair) {}
+		TransactionAndHashVerificationPair(const TransactionAndHashVerificationPair& o) : transaction(o.transaction), pair(o.pair) {}
+		TransactionAndHashVerificationPair(const TransactionAndHashVerificationPair&& o) : transaction(std::move(o.transaction)), pair(o.pair) {}
+		TransactionAndHashVerificationPair& operator=(const TransactionAndHashVerificationPair& other){ transaction = other.transaction; pair = other.pair; return *this; }
+		TransactionAndHashVerificationPair& operator=(const TransactionAndHashVerificationPair&& other){ transaction = std::move(other.transaction); pair = other.pair; return *this; }
+		bool operator==(const TransactionAndHashVerificationPair& o) const {
+			return transaction.hash == o.transaction.hash && pair.peerID == o.pair.peerID && pair.signature == o.pair.signature;
+		}
 	};
-	std::list<TransactionAndHashVerificationPair> networkQueue;
+	// Queue which holds incoming transactions
+	ModifiableQueue<TransactionAndHashVerificationPair, circular_buffer<std::vector<TransactionAndHashVerificationPair>>> networkQueue;
+	const size_t NETWORK_QUEUE_MAX_SIZE = 1000, NETWORK_QUEUE_MIN_SIZE = 10; // TODO: make into a #define
+
+	// If we are running out of room in the network queue, expand it
+	void growNetworkQueue(){
+		auto& container = networkQueue.getContainer();
+		if(size_t size = container.size(), capacity = container.capacity(); size == capacity && size < NETWORK_QUEUE_MAX_SIZE)
+			networkQueue.getContainer().resize(std::clamp(size * 2, NETWORK_QUEUE_MIN_SIZE, NETWORK_QUEUE_MAX_SIZE)); // Clamp the queues size in the range [10, NETWORK_QUEUE_MAX_SIZE]
+	}
+
+	// If the network queue is nearing half of its capacity, shrink it
+	void shrinkNetworkQueue(){
+		auto& container = networkQueue.getContainer();
+		if(size_t size = container.size(), capacity = container.capacity(); size <= capacity / 2 && size > NETWORK_QUEUE_MIN_SIZE)
+			container = std::vector<TransactionAndHashVerificationPair>(container.begin(), container.end()); // Make a new container containing only the used values of the buffer with its start reset
+	}
 
 protected:
 	void connect_disconnectListener(breep::tcp::network& network, const breep::tcp::peer& peer) {
@@ -387,9 +426,11 @@ public:
 			for(size_t i = 0; i < listSize; i++){
 				Transaction frontTrx = t.networkQueue.front().transaction;
 				HashVerificationPair frontSig = t.networkQueue.front().pair;
-				t.networkQueue.pop_front();
+				t.networkQueue.pop();
 				attemptToAddTransaction(frontTrx, frontSig, t);
 			}
+			// Reduce the size of the network queue if we are wasting space
+			t.shrinkNetworkQueue();
 
 			std::cout << "Processed remote transaction add with hash `" + transaction.hash + "` from " << networkData.source.id() << std::endl;
 		}
@@ -402,9 +443,10 @@ public:
 					auto& peers = t.network.peers();
 					auto& sender = peers.at(validityPair.peerID);
 					t.network.send_object_to(sender, PublicKeySyncRequest());
-					t.networkQueue.emplace_back();
-					t.networkQueue.back().transaction = transaction;
-					t.networkQueue.back().pair = validityPair;
+
+					// If we are running out of room in the network queue, expand it
+					t.growNetworkQueue();
+					t.networkQueue.emplace(transaction, validityPair);
 
 					std::cout << "Received transaction add from unverified peer `" << validityPair.peerID << "`, enquing transaction with hash `" << transaction.hash << "` and requesting peer's key." << std::endl;
 					return;
@@ -423,9 +465,9 @@ public:
 					if(parent)
 						parents.push_back(parent);
 					else {
-						t.networkQueue.emplace_back();
-						t.networkQueue.back().transaction = transaction;
-						t.networkQueue.back().pair = validityPair;
+						// If we are running out of room in the network queue, expand it
+						t.growNetworkQueue();
+						t.networkQueue.emplace(transaction, validityPair);
 						parentsFound = false;
 						std::cout << "Remote transaction with hash `" + transaction.hash + "` is temporarily orphaned... enqueuing for later" << std::endl;
 						break;
