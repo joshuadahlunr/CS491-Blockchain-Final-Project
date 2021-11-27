@@ -97,16 +97,26 @@ struct Transaction {
 		}()),
 		// Copy the parent hashes so that they are locally owned
 		parentHashes([](std::span<Hash> parentHashes) -> std::span<Hash> {
-			Hash* backing = new Hash[parentHashes.size()];
-			for(size_t i = 0; i < parentHashes.size(); i++)
-				(*((std::string*) backing + i)) = parentHashes[i]; // Drop the const to allow a copy to occur
+			// Ensure that there are no duplicate parent hashes
+			std::unordered_set<std::string> uniqueHashesSet;
+			for(auto& hash: parentHashes)
+				uniqueHashesSet.insert(hash);
+			// Sort the hashes
+			std::vector<std::string> uniqueHashes(uniqueHashesSet.begin(), uniqueHashesSet.end());
+			std::sort(uniqueHashes.begin(), uniqueHashes.end());
 
-			return {backing, parentHashes.size()};
+			Hash* backing = new Hash[uniqueHashes.size()];
+			auto cur = uniqueHashes.begin();
+			for(size_t i = 0; i < uniqueHashes.size(); i++, cur++)
+				*util::mutable_cast(backing + i) = uniqueHashes[i]; // Drop the const to allow a copy to occur
+
+			return {backing, uniqueHashes.size()};
 		}(parentHashes)),
 		// Hash everything stored
 		hash(hashTransaction()) {}
 
 	Transaction(const Transaction& other) : timestamp(other.timestamp), inputs(other.inputs), outputs(other.outputs), parentHashes(other.parentHashes), hash(other.hash) { *this = other; }
+	Transaction(const Transaction&& other) : timestamp(other.timestamp), inputs(other.inputs), outputs(other.outputs), parentHashes(other.parentHashes), hash(other.hash) { *this = std::move(other); }
 
 	~Transaction(){
 		// Clean up the parent hashes so that we don't have a memory leak
