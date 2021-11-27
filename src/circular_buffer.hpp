@@ -285,7 +285,7 @@ struct circular_buffer_explicit : public circular_buffer_base<T, Container, Allo
 
 
 // Version of the secure buffer which ensures that any element not actively in use is set to a reset value
-template<typename T, T RESET_VALUE = 0, typename Container = std::array<T, 10>, typename Allocator = std::allocator<typename Container::value_type>>
+template<typename T, typename Container = std::array<T, 10>, typename Allocator = std::allocator<typename Container::value_type>>
 struct secure_circular_buffer_base : public circular_buffer_base<T, Container, Allocator> {
 	using Base = circular_buffer_base<T, Container, Allocator>;
 	using container_type = typename Base::container_type;
@@ -302,18 +302,23 @@ struct secure_circular_buffer_base : public circular_buffer_base<T, Container, A
 	using reverse_iterator = typename Base::reverse_iterator;
 	using const_reverse_iterator = typename Base::const_reverse_iterator;
 
+protected:
+	T resetValue;
+
 public:
-	secure_circular_buffer_base() { clear(); }
+	secure_circular_buffer_base() : resetValue(resetValue) { clear(); }
 	secure_circular_buffer_base(const Container& c, size_t start = 0) : Base(c, start) { clear(); }
 	secure_circular_buffer_base(const Container&& c, size_t start = 0) : Base(std::move(c), start) { clear(); }
 	secure_circular_buffer_base(const Base& b) : Base(b) { clear(); }
 	secure_circular_buffer_base(const Base&& b) : Base(std::move(b)) { clear(); }
 
+	void setResetValue(T resetValue) { this->resetValue = resetValue; }
+
 	// Function which makes sure every element is set to the reset value
 	void clear(){
 		Container& self = *this;
 		for(auto& e: self)
-			e = RESET_VALUE;
+			e = resetValue;
 	}
 
 	// Function which makes sure every element is set to the reset value, and resets the size and start of the buffer
@@ -331,7 +336,7 @@ public:
 			Base::_size++;
 		} else {
 			Base::decrement(Base::start);
-			Container::operator[](Base::start - 1) = RESET_VALUE; // Reset the value in the empty slot
+			Container::operator[](Base::start - 1) = resetValue; // Reset the value in the empty slot
 		}
 
 		Base::get_allocator().construct(&Container::operator[](Base::start), std::forward<Args>(args)...);
@@ -345,7 +350,7 @@ public:
 			Base::_size++;
 		} else {
 			Base::decrement(Base::start);
-			Container::operator[](Base::start - 1) = RESET_VALUE; // Reset the value in the empty slot
+			Container::operator[](Base::start - 1) = resetValue; // Reset the value in the empty slot
 		}
 
 		Container::operator[](Base::start) = r;
@@ -355,7 +360,7 @@ public:
 	// Function which removes an element from the front of the buffer
 	void pop_front() {
 		if(Base::size() > 0){
-			Container::operator[](Base::start) = RESET_VALUE; // Reset the value in the empty slot
+			Container::operator[](Base::start) = resetValue; // Reset the value in the empty slot
 			Base::increment(Base::start);
 			Base::_size--;
 		}
@@ -368,7 +373,7 @@ public:
 
 		if(Base::size() < Base::_capacity() - 1) Base::_size++;
 		else {
-			Container::operator[](Base::start) = RESET_VALUE; // Reset the value in the empty slot
+			Container::operator[](Base::start) = resetValue; // Reset the value in the empty slot
 			Base::increment(Base::start);
 		}
 
@@ -381,7 +386,7 @@ public:
 
 		if(Base::size() < Base::_capacity() - 1) Base::_size++;
 		else {
-			Container::operator[](Base::start) = RESET_VALUE; // Reset the value in the empty slot
+			Container::operator[](Base::start) = resetValue; // Reset the value in the empty slot
 			Base::increment(Base::start);
 		}
 	}
@@ -392,28 +397,28 @@ public:
 		if(Base::size() > 0)
 			Base::_size--;
 
-		Container::operator[](Base::_end()) = RESET_VALUE; // Reset the value in the empty slot
+		Container::operator[](Base::_end()) = resetValue; // Reset the value in the empty slot
 	}
 };
 
 // Secure buffer based on a container
-template<typename Container, typename Container::value_type RESET_VALUE = 0>
-struct secure_circular_buffer : public secure_circular_buffer_base<typename Container::value_type, RESET_VALUE, Container, typename Container::allocator_type> {
-	using Base = secure_circular_buffer_base<typename Container::value_type, RESET_VALUE, Container, typename Container::allocator_type>;
+template<typename Container>
+struct secure_circular_buffer : public secure_circular_buffer_base<typename Container::value_type, Container, typename Container::allocator_type> {
+	using Base = secure_circular_buffer_base<typename Container::value_type, Container, typename Container::allocator_type>;
 	using Base::Base;
 };
 
 // Secure buffer based on a std::array
-template<typename T, size_t N, T RESET_VALUE = 0>
-struct secure_circular_buffer_array : public secure_circular_buffer_base<T, RESET_VALUE, std::array<T, N>, std::allocator<T>> {
-	using Base = secure_circular_buffer_base<T, RESET_VALUE, std::array<T, N>, std::allocator<T>>;
+template<typename T, size_t N>
+struct secure_circular_buffer_array : public secure_circular_buffer_base<T, std::array<T, N>, std::allocator<T>> {
+	using Base = secure_circular_buffer_base<T, std::array<T, N>, std::allocator<T>>;
 	using Base::Base;
 };
 
 // Secure buffer with explicit controls
-template<typename T, T RESET_VALUE = 0, typename Container = std::array<T, 10>, typename Allocator = std::allocator<T>>
-struct secure_circular_buffer_explicit : public secure_circular_buffer_base<T, RESET_VALUE, Container, Allocator> {
-	using Base = secure_circular_buffer_base<T, RESET_VALUE, Container, Allocator>;
+template<typename T, typename Container = std::array<T, 10>, typename Allocator = std::allocator<T>>
+struct secure_circular_buffer_explicit : public secure_circular_buffer_base<T, Container, Allocator> {
+	using Base = secure_circular_buffer_base<T, Container, Allocator>;
 	using Base::Base;
 };
 

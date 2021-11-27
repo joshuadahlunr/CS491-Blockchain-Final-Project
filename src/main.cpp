@@ -289,6 +289,14 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 
+		// Generate the latest common genesis and prunes the tree
+		case 'g':
+			{
+				t.prune();
+				t.genesis->debugDump();
+			}
+			break;
+
 		// Save tangle
 		case 's':
 			{

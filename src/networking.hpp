@@ -17,15 +17,6 @@
 // The default port to start searching for ports at
 #define DEFAULT_PORT_NUMBER 12345;
 
-// Extension to a std::queue which allows modification of its container
-template<typename T, typename Container = std::deque<T>>
-struct ModifiableQueue: public std::queue<T, Container> {
-	using Base = std::queue<T, Container>;
-	using Base::Base;
-
-	Container& getContainer() { return Base::c; }
-};
-
 // Function which attempts to remotely read data from a sodket until the <timeout> amount of time has elapsed
 // Returns true if the read was successful, false otherwise
 template <typename MutableBufferSequence, typename Duration>
@@ -154,6 +145,190 @@ struct NetworkedTangle: public Tangle {
 		return out;
 	}
 
+	TransactionNode::ptr createLatestCommonGenesis(){
+		// If there are no genesis canidates our genesis is the latest common genesis
+		if(genesisCanidates.empty()) return genesis;
+
+		std::cout << "Genesis canidates found" << std::endl;
+
+		// Look through the queue and find the latest canidate set of nodes with 100% confidence
+		std::vector<TransactionNode::const_ptr>* _chosen = nullptr;
+		for(auto& canidate: genesisCanidates.getContainer()){
+			bool valid = true;
+			for(auto& trx: canidate)
+				if(trx->confirmationConfidence() < 1){
+					valid = false;
+					break;
+				}
+
+			if(valid)
+				_chosen = &canidate;
+		}
+
+		// If we didn't find any canidates with 100% confidence, our genesis is the latest common genesis
+		if(!_chosen) return genesis;
+		std::cout << "Picked Genesis Nodes" << std::endl;
+
+		std::vector<TransactionNode::const_ptr>& chosen = *_chosen;
+		std::vector<TransactionNode::const_ptr> parents;
+		std::vector<Transaction::Input> inputs;
+		std::vector<Transaction::Output> outputs;
+
+		// Lamba which calculates the balance of the given acount as seen by the chosen nodes
+		auto reverseBalanceQuery = [&](const key::PublicKey& account){
+			std::list<std::string> considered;
+			double balance = 0;
+
+			std::queue<TransactionNode::const_ptr> q;
+			for(auto& c: chosen) q.push(c);
+
+			while(!q.empty()){
+				auto head = q.front();
+				q.pop();
+				if(!head) continue;
+
+				// NOTE: the balances have already been validated going forward... assuming they are correct
+				// Add up how this transaction takes away from the balance of interest
+				for(const Transaction::Input& input: head->inputs)
+					if(input.account() == account)
+						balance -= input.amount;
+				// Add up how this transaction adds to the balance of interest
+				for(const Transaction::Output& output: head->outputs)
+					if(output.account() == account)
+						balance += output.amount;
+
+				// Add all of the parents to the queue if they weren't already there
+				for(auto& parent: head->parents)
+					if(std::find(considered.begin(), considered.end(), parent->hash) == considered.end()){
+						q.push(parent);
+						considered.push_back(parent->hash);
+					}
+			}
+
+			return balance;
+		};
+
+		// Lambda which generates a list of every account refernced in the tangle
+		auto listAccounts = [&](){
+			std::list<std::string> considered;
+			std::list<key::PublicKey> out;
+
+			std::queue<TransactionNode::const_ptr> q;
+			q.push(genesis);
+
+			while(!q.empty()){
+				auto head = q.front();
+				q.pop();
+				if(!head) continue;
+
+				// Find all of the accounts referenced in this transaction and add them to the output list (if they aren't already there)
+				for(const Transaction::Input& input: head->inputs)
+					if(auto account = input.account(); std::find(out.begin(), out.end(), account) == out.end())
+						out.push_back(account);
+				// Add up how this transaction adds to the balance of interest
+				for(const Transaction::Output& output: head->outputs)
+					if(auto account = output.account(); std::find(out.begin(), out.end(), account) == out.end())
+						out.push_back(account);
+
+				// Determine if this node is one of the chosen nodes
+				bool isChosen = false;
+				for(auto& c: chosen)
+					if(head->hash == c->hash){
+						isChosen = true;
+						break;
+					}
+
+				// Add this node's children unless we have already considered them (making sure we don't go past the chosen nodes)
+				if(!isChosen) {
+					auto lock = head->children.read_lock();
+					for(size_t i = 0, size = lock->size(); i < size; i++)
+						if(auto child = lock[i]; std::find(considered.begin(), considered.end(), child->hash) == considered.end()){
+							q.push(child);
+							considered.push_back(child->hash);
+						}
+				}
+			}
+
+			return out;
+		};
+
+		// Calculate the balance of every peer referenced in an account before the chosen nodes, and add that balance as an output of the genesis
+		for(auto accounts = listAccounts(); auto& account: accounts)
+			outputs.emplace_back(account, reverseBalanceQuery(account));
+
+		std::cout << "Tabulated account balances" << std::endl;
+
+		// Create a new transaction and set its hash to the hash of the first chosen node
+		auto trx = TransactionNode::create(parents, inputs, outputs);
+		util::makeMutable(trx->hash) = chosen[0]->hash;
+
+		// Fill the transaction's parent hashes with the remaining hashes of the chosen nodes
+		auto& parentHashes = util::makeMutable(trx->parentHashes);
+		delete [] parentHashes.data(); // Free the current parent hashes
+		parentHashes = {new Hash[chosen.size() - 1], chosen.size() - 1}; // Create new memory to back the parent hashes
+		for(int i = 1; i < chosen.size(); i++)
+			util::makeMutable(parentHashes[i]) = chosen[i]->hash;
+
+		return trx;
+	}
+
+	void prune(){
+		// Generate the new latest common genesis
+		auto genesis = createLatestCommonGenesis();
+
+		// Cache a copy of the current tips and then clear the tangle's copy
+		auto originalTips = tips.unsafe();
+		util::makeMutable(tips)->clear();
+
+		{
+			// Find all of the children of the nodes which were merged together into the new genesis node
+			std::vector<TransactionNode::ptr> children;
+			{
+				auto node = find(genesis->hash);
+				auto lock = node->children.write_lock();
+				children = std::move(*lock);
+				lock->clear(); // Clear the list in the tree so they don't get pruned when we swap out genesises
+
+				// Clear the node's parent's children and mark it as a tip
+				for(auto& parent: node->parents){
+					util::makeMutable(parent->children)->clear(); // Clear out the children of the node's parent
+					util::makeMutable(tips)->push_back(parent); // Mark the now childless parent as a tip
+				}
+			}
+			for(auto& hash: genesis->parentHashes){
+				auto node = find(hash);
+				auto lock = node->children.write_lock();
+				children = std::move(*lock);
+				lock->clear(); // Clear the list in the tree so they don't get pruned when we swap out genesises
+
+				// Clear the node's parent's children and mark it as a tip
+				for(auto& parent: node->parents){
+					util::makeMutable(parent->children)->clear(); // Clear out the children of the node's parent
+					util::makeMutable(tips)->push_back(parent); // Mark the now childless parent as a tip
+				}
+			}
+
+			// Ensure there are no duplicate children or tips
+			util::removeDuplicates(children);
+			util::removeDuplicates(util::makeMutable(tips.unsafe()));
+
+			// Move the list of children into the new genesis
+			*genesis->children.write_lock() = std::move(children);
+
+			// Update the children to point to the new genesis
+			auto lock = genesis->children.write_lock();
+			for(size_t i = 0; i < lock->size(); i++)
+				util::makeMutable(lock[i]->parents) = { genesis };
+		}
+		std::cout << "Situated children" << std::endl;
+
+		// Update the tangle's genesis (removes all the nodes up to the temporary list of tips)
+		setGenesis(genesis);
+
+		// Restore the original list of tips
+		*util::makeMutable(tips.write_lock()) = originalTips;
+	}
+
 	// Function which allows saving a tangle to a file
 	void saveTangle(std::ostream& out) {
 		// List all of the transactions in the tangle
@@ -234,7 +409,7 @@ private:
 	};
 	// Queue which holds incoming transactions
 	ModifiableQueue<TransactionAndHashVerificationPair, circular_buffer<std::vector<TransactionAndHashVerificationPair>>> networkQueue;
-	const size_t NETWORK_QUEUE_MAX_SIZE = 1000, NETWORK_QUEUE_MIN_SIZE = 10; // TODO: make into a #define
+	const size_t NETWORK_QUEUE_MIN_SIZE = 8, NETWORK_QUEUE_MAX_SIZE = 1024; // TODO: make into a #define
 
 	// If we are running out of room in the network queue, expand it
 	void growNetworkQueue(){
@@ -257,7 +432,7 @@ protected:
 			std::cout << peer.id() << " connected!" << std::endl;
 
 		// Someone disconnected...
-		else 
+		else
 			std::cout << peer.id() << " disconnected" << std::endl;
 	}
 

@@ -5,11 +5,21 @@
 #include <string>
 #include <ostream>
 #include <istream>
+#include <queue>
 #include <unordered_set>
 #include <cryptopp/sha3.h>
 #include <cryptopp/filters.h>
 #include <cryptopp/base64.h>
 #include <cryptopp/gzip.h>
+
+// Extension to a std::queue which allows modification of its container
+template<typename T, typename Container = std::deque<T>>
+struct ModifiableQueue: public std::queue<T, Container> {
+	using Base = std::queue<T, Container>;
+	using Base::Base;
+
+	Container& getContainer() { return Base::c; }
+};
 
 namespace util {
 
@@ -74,6 +84,13 @@ namespace util {
 		});
 
 		v.erase(end, v.end());
+	}
+
+	// Function which removes all duplicate elements from a vector (using an arbitrary predicate to check for equality)
+	template<typename T, typename Function >
+	void removeDuplicates(std::vector<T>& v, Function pred){
+		sort( v.begin(), v.end() );
+		v.erase( unique( v.begin(), v.end(), pred), v.end() );
 	}
 
 

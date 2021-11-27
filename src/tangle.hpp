@@ -10,8 +10,12 @@
 #include <thread>
 
 #include "monitor.hpp"
+#include "circular_buffer.hpp"
 
 #include "transaction.hpp"
+
+// The number of tips there can be at most in a given instant of time to qualify to be converted into a genesis
+#define GENESIS_CANIDATE_THRESHOLD 3
 
 struct Tangle;
 
@@ -34,6 +38,11 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	TransactionNode(const std::vector<TransactionNode::const_ptr> parents, const std::vector<Input>& inputs, const std::vector<Output>& outputs, uint8_t difficulty = 3) :
 		// Construct the base transaction with the hashes of the parent nodes
 		Transaction([](const std::vector<TransactionNode::const_ptr>& parents) -> std::vector<std::string> {
+			// Make sure the node has no duplicate parents listed (comparing hashes)
+			util::removeDuplicates(util::makeMutable(parents), [](const TransactionNode::const_ptr& a, const TransactionNode::const_ptr& b){
+				return a->hash == b->hash;
+			});
+
 			std::vector<std::string> out;
 			for(const TransactionNode::const_ptr& p: parents)
 				out.push_back(p->hash);
@@ -55,6 +64,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	void debugDump() {
 		Transaction::debugDump();
 
+		std::cout << "Is Genesis? " << (isGenesis ? "True" : "False")  << std::endl;
 		std::cout << "Weight: " << ownWeight() << std::endl;
 		std::cout << "Score: " << score() << std::endl;
 		std::cout << "Cumulative weight: " << cumulativeWeight << std::endl;
@@ -76,6 +86,12 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 			// If the hash matches return the current head
 			if(head->hash == hash) return head;
+
+			// If the node is the genesis node, its parent hashes include a list of hashes it is aliasing
+			if(head->isGenesis)
+				for(auto& h: head->parentHashes)
+					if(h == hash)
+						return head;
 
 			// Add this node's children unless we have already considered them
 			auto lock = head->children.read_lock();
@@ -100,6 +116,12 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 			// If the hash matches return the current head
 			if(head->hash == hash) return head;
+
+			// If the node is the genesis node, its parent hashes include a list of hashes it is aliasing
+			if(head->isGenesis)
+				for(auto& h: head->parentHashes)
+					if(h == hash)
+						return head;
 
 			// Add this node's children unless we have already considered them
 			auto lock = head->children.read_lock();
@@ -266,6 +288,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 
 		// Generate an at least 100 element long list of nodes to walk from
 		std::list<TransactionNode::const_ptr> walkList = generateWalkSet();
+		if(walkList.empty()) return 0; // If the walk list is empty, we have no confidence in the node
 		while(walkList.size() < 100)
 			merge(walkList, walkList);
 
@@ -288,9 +311,9 @@ struct Tangle {
 	struct NodeNotFoundException : public std::runtime_error { NodeNotFoundException(Hash hash) : std::runtime_error("Failed to find node with hash `" + hash + "`") {} };
 	// Exception thrown when an invalid balance is detected
 	struct InvalidBalance : public std::runtime_error {
-		TransactionNode::ptr node;
+		TransactionNode::const_ptr node;
 		const key::PublicKey& account;
-		InvalidBalance(TransactionNode::ptr node, const key::PublicKey& account, double balance) : std::runtime_error("Node with hash `" + node->hash + "` results in a balance of `" + std::to_string(balance) + "` for an account."), node(node), account(account) {}
+		InvalidBalance(TransactionNode::const_ptr node, const key::PublicKey& account, double balance) : std::runtime_error("Node with hash `" + node->hash + "` results in a balance of `" + std::to_string(balance) + "` for an account."), node(node), account(account) {}
 	};
 
 	// Pointer to the Genesis block
@@ -304,6 +327,9 @@ protected:
 
 	// Flag which determines if a transaction add should recalculate weights or not
 	bool updateWeights = true;
+
+	// Circular buffer queue of size 10 of canidates to be converted into the genesis
+	ModifiableQueue<std::vector<TransactionNode::const_ptr>, secure_circular_buffer_array<std::vector<TransactionNode::const_ptr>, 10>> genesisCanidates;
 
 public:
 
@@ -331,6 +357,11 @@ public:
 
 		// Update the genesis
 		util::makeMutable(this->genesis) = genesis;
+
+		// If we are updating weights... start updating weights
+		if(updateWeights) std::thread([this](){
+			updateCumulativeWeights(this->genesis);
+		}).detach();
 	}
 
 	// Function which finds a node in the graph given its hash
@@ -338,9 +369,7 @@ public:
 	TransactionNode::ptr find(Hash hash) { return genesis->find(hash); }
 
 	// Function which performs a biased random walk on the tangle
-	TransactionNode::const_ptr biasedRandomWalk() const {
-		return genesis->biasedRandomWalk();
-	}
+	TransactionNode::const_ptr biasedRandomWalk() const { return genesis->biasedRandomWalk(); }
 
 	// Function which adds a node to the tangle
 	Hash add(const TransactionNode::ptr node){
@@ -397,12 +426,13 @@ public:
 					throw std::runtime_error("Transaction with hash `" + parent->hash + "` already has a child with hash `" + node->hash + "`");
 		}
 
+
 		{ // Begin Critical Region
 			std::scoped_lock lock(mutex);
 
 			// For each parent of the new node...
 			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
-			for(auto childLock = node->children.write_lock(); const TransactionNode::const_ptr& parent: node->parents){
+			for(const TransactionNode::const_ptr& parent: node->parents){
 				// Remove the parent from the list of tips
 				auto tipsLock = tips.write_lock();
 				std::erase(*tipsLock, parent);
@@ -417,6 +447,10 @@ public:
 			if(updateWeights) std::thread([this, node](){
 				updateCumulativeWeights(node);
 			}).detach();
+
+			// Add the current tips as canidate to become a new genesis
+			if(auto tipsLock = tips.read_lock(); tipsLock->size() <= GENESIS_CANIDATE_THRESHOLD)
+				genesisCanidates.push(*tipsLock);
 		} // End Critical Region
 
 		// Return the hash of the node
@@ -438,20 +472,26 @@ public:
 
 		{ // Begin Critical Region
 			std::scoped_lock lock(mutex);
-			auto tipsLock = tips.write_lock();
+			// TODO: is it okay to not lock in here since tips are usually accessed in a locked loop?
+			// auto tipsLock = tips.write_lock();
 
 			// Remove the node as a child from each of its parents
 			for(size_t i = 0; i < node->parents.size(); i++){
-				auto lock = node->parents[i]->children.write_lock();
-				std::erase(*lock, node);
+				// auto lock = node->parents[i]->children.write_lock();
+				auto& children = util::makeMutable(node->parents[i]->children.unsafe());
+				// std::erase(*lock, node);
+				std::erase(children, node);
 
 				// If the parent no longer has children, mark it as a tip
-				if(lock->empty())
-					tipsLock->push_back(node->parents[i]);
+				// if(lock->empty())
+				if(children.empty())
+					// tipsLock->push_back(node->parents[i]);
+					util::makeMutable(tips.unsafe()).push_back(node->parents[i]);
 			}
 
 			// Remove the node from the list of tips
-			std::erase(*tipsLock, node);
+			// std::erase(*lock, node);
+			std::erase(util::makeMutable(tips.unsafe()), node);
 
 			// Clear the list of parents
 			util::makeMutable(node->parents).clear();
