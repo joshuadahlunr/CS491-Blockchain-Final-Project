@@ -253,19 +253,12 @@ private:
 protected:
 	void connect_disconnectListener(breep::tcp::network& network, const breep::tcp::peer& peer) {
 		// Someone connected...
-		if (peer.is_connected()) {
+		if (peer.is_connected())
 			std::cout << peer.id() << " connected!" << std::endl;
 
 		// Someone disconnected...
-		} else {
+		else 
 			std::cout << peer.id() << " disconnected" << std::endl;
-
-			// Erase all keys associated with the disconnected peer's id
-			std::erase_if(peerKeys, [id = peer.id()](const auto& item) {
-		        auto const& [key, value] = item;
-		        return key == id;
-		    });
-		}
 	}
 
 

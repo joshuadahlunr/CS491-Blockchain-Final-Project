@@ -276,7 +276,7 @@ int main(int argc, char* argv[]) {
 		case 'r':
 			{
 				std::cout << t.tips.read_lock()->size() << " tips to find" << std::endl;
-				auto res = t.genesis->biasedRandomWalk(5, 0);
+				auto res = t.genesis->biasedRandomWalk();
 				std::cout << "found: " << res->hash << std::endl;
 				std::cout << t.genesis->isChild(res) << std::endl;
 			}

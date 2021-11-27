@@ -273,7 +273,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Count the number of random walks from the set that result in a tip that aproves this node
 		uint8_t confidence = 0;
 		for(TransactionNode::const_ptr base: walkList){
-			if(auto tip = base->biasedRandomWalk(0); tip && isChild(tip))
+			if(auto tip = base->biasedRandomWalk(); tip && isChild(tip))
 				confidence++;
 		}
 
@@ -402,7 +402,7 @@ public:
 
 			// For each parent of the new node...
 			// NOTE: this happens in a second loop since we need to ensure all of the parents are valid before we add the node as a child of any of them
-			for(const TransactionNode::const_ptr& parent: node->parents){
+			for(auto childLock = node->children.write_lock(); const TransactionNode::const_ptr& parent: node->parents){
 				// Remove the parent from the list of tips
 				auto tipsLock = tips.write_lock();
 				std::erase(*tipsLock, parent);

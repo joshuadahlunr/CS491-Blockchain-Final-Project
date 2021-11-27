@@ -58,7 +58,7 @@ unsigned short handshake::determineRemotePort(boost::asio::io_service& io_servic
 
 	// Try connecting to incremented ports for 5 seconds...
 	auto start = std::chrono::steady_clock::now();
-	while(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() < 10000) // Try to connect for 10 seconds
+	while(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() < 3) // Try to connect for 3 seconds
 		try{
 			// Ping for a handshake
 			boost::system::error_code ec;
