@@ -39,7 +39,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 		// Construct the base transaction with the hashes of the parent nodes
 		Transaction([](const std::vector<TransactionNode::const_ptr>& parents) -> std::vector<std::string> {
 			// Make sure the node has no duplicate parents listed (comparing hashes)
-			util::removeDuplicates(util::makeMutable(parents), [](const TransactionNode::const_ptr& a, const TransactionNode::const_ptr& b){
+			util::removeDuplicates(util::mutable_cast(parents), [](const TransactionNode::const_ptr& a, const TransactionNode::const_ptr& b){
 				return a->hash == b->hash;
 			});
 
@@ -136,7 +136,7 @@ struct TransactionNode : public Transaction, public std::enable_shared_from_this
 	}
 
 	// Function which recursively determines if the <target> is a child
-	inline bool isChild(TransactionNode::const_ptr& target) const { return util::makeMutable(this)->find(target->hash) != nullptr; }
+	inline bool isChild(TransactionNode::const_ptr& target) const { return util::mutable_cast(this)->find(target->hash) != nullptr; }
 
 	// Function which recursively prints out all of nodes in the graph
 	void recursiveDebugDump(std::list<std::string>& considered, size_t depth = 0) const {
@@ -347,16 +347,16 @@ public:
 	// Function which sets the genesis node
 	void setGenesis(TransactionNode::ptr genesis){
 		// Mark the new node as the genesis
-		if(genesis) util::makeMutable(genesis->isGenesis) = true;
+		if(genesis) util::mutable_cast(genesis->isGenesis) = true;
 
 		// Free the memory for every child of the old genesis (if it exists)
 		if(this->genesis)
 			for(auto lock = this->genesis->children.read_lock(); !lock->empty(); )
-				for(auto [i, tipsLock] = std::make_pair(size_t(0), util::makeMutable(tips).read_lock()); i < tipsLock->size(); i++)
+				for(auto [i, tipsLock] = std::make_pair(size_t(0), util::mutable_cast(tips).read_lock()); i < tipsLock->size(); i++)
 					removeTip(tipsLock[0]);
 
 		// Update the genesis
-		util::makeMutable(this->genesis) = genesis;
+		util::mutable_cast(this->genesis) = genesis;
 
 		// If we are updating weights... start updating weights
 		if(updateWeights) std::thread([this](){
@@ -478,7 +478,7 @@ public:
 			// Remove the node as a child from each of its parents
 			for(size_t i = 0; i < node->parents.size(); i++){
 				// auto lock = node->parents[i]->children.write_lock();
-				auto& children = util::makeMutable(node->parents[i]->children.unsafe());
+				auto& children = util::mutable_cast(node->parents[i]->children.unsafe());
 				// std::erase(*lock, node);
 				std::erase(children, node);
 
@@ -486,15 +486,15 @@ public:
 				// if(lock->empty())
 				if(children.empty())
 					// tipsLock->push_back(node->parents[i]);
-					util::makeMutable(tips.unsafe()).push_back(node->parents[i]);
+					util::mutable_cast(tips.unsafe()).push_back(node->parents[i]);
 			}
 
 			// Remove the node from the list of tips
 			// std::erase(*lock, node);
-			std::erase(util::makeMutable(tips.unsafe()), node);
+			std::erase(util::mutable_cast(tips.unsafe()), node);
 
 			// Clear the list of parents
-			util::makeMutable(node->parents).clear();
+			util::mutable_cast(node->parents).clear();
 		} // End Critical Region
 
 		// Nulify the passed in reference to the node
@@ -577,7 +577,7 @@ protected:
 			float cumulativeWeight = head->ownWeight();
 			for(size_t i = 0, size = head->children.read_lock()->size(); i < size; i++)
 				cumulativeWeight += head->children.read_lock()[i]->cumulativeWeight;
-			util::makeMutable(head->cumulativeWeight) = cumulativeWeight;
+			util::mutable_cast(head->cumulativeWeight) = cumulativeWeight;
 
 			// Add this node's parents to the back of the queue
 			for(auto& parent: head->parents)

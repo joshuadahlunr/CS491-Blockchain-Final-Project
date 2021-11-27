@@ -23,8 +23,8 @@ struct ModifiableQueue: public std::queue<T, Container> {
 
 namespace util {
 
-	template<typename T> typename std::remove_cv<T>::type* makeMutable(const T* in) { return (T*) in; }
-	template<typename T> typename std::remove_cv<T>::type& makeMutable(const T& in) { return *((T*) &in); }
+	template<typename T> typename std::remove_cv<T>::type* mutable_cast(const T* in) { return (T*) in; }
+	template<typename T> typename std::remove_cv<T>::type& mutable_cast(const T& in) { return *((T*) &in); }
 
 	// Function which checks if the provided range includes the specified <needle>, checking for equality with function <f>
 	template<typename T, typename Iterator, typename Function>

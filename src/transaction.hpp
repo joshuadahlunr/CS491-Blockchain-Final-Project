@@ -114,33 +114,33 @@ struct Transaction {
 	}
 
 	Transaction& operator=(const Transaction& _new){
-		util::makeMutable(timestamp) = _new.timestamp;
-		util::makeMutable(nonce) = _new.nonce;
-		util::makeMutable(miningDifficulty) = _new.miningDifficulty;
-		util::makeMutable(miningTarget) = _new.miningTarget;
-		util::makeMutable(inputs) = _new.inputs;
-		util::makeMutable(outputs) = _new.outputs;
+		util::mutable_cast(timestamp) = _new.timestamp;
+		util::mutable_cast(nonce) = _new.nonce;
+		util::mutable_cast(miningDifficulty) = _new.miningDifficulty;
+		util::mutable_cast(miningTarget) = _new.miningTarget;
+		util::mutable_cast(inputs) = _new.inputs;
+		util::mutable_cast(outputs) = _new.outputs;
 
 		Hash* backing = new Hash[_new.parentHashes.size()];
 		for(size_t i = 0; i < _new.parentHashes.size(); i++)
-			*util::makeMutable(backing + i) = _new.parentHashes[i]; // Drop the const to allow a copy to occur
+			*util::mutable_cast(backing + i) = _new.parentHashes[i]; // Drop the const to allow a copy to occur
 
-		util::makeMutable(parentHashes) = {backing, _new.parentHashes.size()};
-		util::makeMutable(hash) = _new.hash;
+		util::mutable_cast(parentHashes) = {backing, _new.parentHashes.size()};
+		util::mutable_cast(hash) = _new.hash;
 
 		return *this;
 	}
 
 	Transaction& operator=(Transaction&& _new){
-		util::makeMutable(timestamp) = _new.timestamp;
-		util::makeMutable(nonce) = _new.nonce;
-		util::makeMutable(miningDifficulty) = _new.miningDifficulty;
-		util::makeMutable(miningTarget) = _new.miningTarget;
-		util::makeMutable(inputs) = std::move(_new.inputs);
-		util::makeMutable(outputs) = std::move(_new.outputs);
-		util::makeMutable(parentHashes) = _new.parentHashes;
-		util::makeMutable(_new.parentHashes) = {(Hash*) nullptr, 0}; // The memory is now managed by this object... not the other one
-		util::makeMutable(hash) = _new.hash;
+		util::mutable_cast(timestamp) = _new.timestamp;
+		util::mutable_cast(nonce) = _new.nonce;
+		util::mutable_cast(miningDifficulty) = _new.miningDifficulty;
+		util::mutable_cast(miningTarget) = _new.miningTarget;
+		util::mutable_cast(inputs) = std::move(_new.inputs);
+		util::mutable_cast(outputs) = std::move(_new.outputs);
+		util::mutable_cast(parentHashes) = _new.parentHashes;
+		util::mutable_cast(_new.parentHashes) = {(Hash*) nullptr, 0}; // The memory is now managed by this object... not the other one
+		util::mutable_cast(hash) = _new.hash;
 
 		return *this;
 	}
@@ -181,8 +181,8 @@ struct Transaction {
 		std::cout << "Started mining transaction..." << std::endl;
 		Timer t;
 		while( !validateTransactionMined() ){
-			util::makeMutable(nonce)++;
-			util::makeMutable(hash) = hashTransaction();
+			util::mutable_cast(nonce)++;
+			util::mutable_cast(hash) = hashTransaction();
 		}
 	}
 
@@ -293,10 +293,10 @@ inline breep::deserializer& operator>>(breep::deserializer& d, Transaction& t) {
 
 	t = Transaction(parentHashes, inputs, outputs, miningDifficulty);
 	// Update several variables behind the scenes
-	util::makeMutable(t.timestamp) = timestamp;
-	util::makeMutable(t.nonce) = nonce;
-	util::makeMutable(t.miningTarget) = miningTarget;
-	util::makeMutable(t.hash) = t.hashTransaction(); // Rehash since the timestamp and nonce have been overridden
+	util::mutable_cast(t.timestamp) = timestamp;
+	util::mutable_cast(t.nonce) = nonce;
+	util::mutable_cast(t.miningTarget) = miningTarget;
+	util::mutable_cast(t.hash) = t.hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 	return d;
 }
 

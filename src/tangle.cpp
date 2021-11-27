@@ -24,7 +24,7 @@ TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::
 	avgHeight /= parents.size();
 
 	// If we can find a tip whoes height (longest path to genesis) qualifies it as left behind, also add it as a parent
-	for(auto [i, tipLock] = std::make_pair(size_t(0), util::makeMutable(t.tips).read_lock()); i < tipLock->size(); i++)
+	for(auto [i, tipLock] = std::make_pair(size_t(0), util::mutable_cast(t.tips).read_lock()); i < tipLock->size(); i++)
 		if(tipLock[i]->height() <= avgHeight - LEFT_BEHIND_TIP_DELTA){
 			parents.push_back(tipLock[i]);
 			break;
@@ -48,10 +48,10 @@ TransactionNode::ptr TransactionNode::create(const Tangle& t, const Transaction&
 		else throw Tangle::NodeNotFoundException(hash);
 
 	auto out = create(parents, trx.inputs, trx.outputs, trx.miningDifficulty);
-	util::makeMutable(out->timestamp) = trx.timestamp;
-	util::makeMutable(out->nonce) = trx.nonce;
-	util::makeMutable(out->miningTarget) = trx.miningTarget;
-	util::makeMutable(out->hash) = out->hashTransaction(); // Rehash since the timestamp and nonce have been overridden
+	util::mutable_cast(out->timestamp) = trx.timestamp;
+	util::mutable_cast(out->nonce) = trx.nonce;
+	util::mutable_cast(out->miningTarget) = trx.miningTarget;
+	util::mutable_cast(out->hash) = out->hashTransaction(); // Rehash since the timestamp and nonce have been overridden
 
 	return out;
 }

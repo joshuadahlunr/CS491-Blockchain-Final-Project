@@ -124,7 +124,7 @@ struct NetworkedTangle: public Tangle {
 
 	// Function which sets the keypair
 	void setKeyPair(const std::shared_ptr<key::KeyPair>& pair, bool networkSync = true){
-		util::makeMutable(personalKeys) = pair;
+		util::mutable_cast(personalKeys) = pair;
 		peerKeys[network.self().id()] = personalKeys->pub;
 		if(networkSync) network.send_object(NetworkedTangle::PublicKeySyncResponse(*pair));
 	}
@@ -260,14 +260,14 @@ struct NetworkedTangle: public Tangle {
 
 		// Create a new transaction and set its hash to the hash of the first chosen node
 		auto trx = TransactionNode::create(parents, inputs, outputs);
-		util::makeMutable(trx->hash) = chosen[0]->hash;
+		util::mutable_cast(trx->hash) = chosen[0]->hash;
 
 		// Fill the transaction's parent hashes with the remaining hashes of the chosen nodes
-		auto& parentHashes = util::makeMutable(trx->parentHashes);
+		auto& parentHashes = util::mutable_cast(trx->parentHashes);
 		delete [] parentHashes.data(); // Free the current parent hashes
 		parentHashes = {new Hash[chosen.size() - 1], chosen.size() - 1}; // Create new memory to back the parent hashes
 		for(int i = 1; i < chosen.size(); i++)
-			util::makeMutable(parentHashes[i]) = chosen[i]->hash;
+			util::mutable_cast(parentHashes[i]) = chosen[i]->hash;
 
 		return trx;
 	}
@@ -278,7 +278,7 @@ struct NetworkedTangle: public Tangle {
 
 		// Cache a copy of the current tips and then clear the tangle's copy
 		auto originalTips = tips.unsafe();
-		util::makeMutable(tips)->clear();
+		util::mutable_cast(tips)->clear();
 
 		{
 			// Find all of the children of the nodes which were merged together into the new genesis node
@@ -291,8 +291,8 @@ struct NetworkedTangle: public Tangle {
 
 				// Clear the node's parent's children and mark it as a tip
 				for(auto& parent: node->parents){
-					util::makeMutable(parent->children)->clear(); // Clear out the children of the node's parent
-					util::makeMutable(tips)->push_back(parent); // Mark the now childless parent as a tip
+					util::mutable_cast(parent->children)->clear(); // Clear out the children of the node's parent
+					util::mutable_cast(tips)->push_back(parent); // Mark the now childless parent as a tip
 				}
 			}
 			for(auto& hash: genesis->parentHashes){
@@ -303,14 +303,14 @@ struct NetworkedTangle: public Tangle {
 
 				// Clear the node's parent's children and mark it as a tip
 				for(auto& parent: node->parents){
-					util::makeMutable(parent->children)->clear(); // Clear out the children of the node's parent
-					util::makeMutable(tips)->push_back(parent); // Mark the now childless parent as a tip
+					util::mutable_cast(parent->children)->clear(); // Clear out the children of the node's parent
+					util::mutable_cast(tips)->push_back(parent); // Mark the now childless parent as a tip
 				}
 			}
 
 			// Ensure there are no duplicate children or tips
 			util::removeDuplicates(children);
-			util::removeDuplicates(util::makeMutable(tips.unsafe()));
+			util::removeDuplicates(util::mutable_cast(tips.unsafe()));
 
 			// Move the list of children into the new genesis
 			*genesis->children.write_lock() = std::move(children);
@@ -318,7 +318,7 @@ struct NetworkedTangle: public Tangle {
 			// Update the children to point to the new genesis
 			auto lock = genesis->children.write_lock();
 			for(size_t i = 0; i < lock->size(); i++)
-				util::makeMutable(lock[i]->parents) = { genesis };
+				util::mutable_cast(lock[i]->parents) = { genesis };
 		}
 		std::cout << "Situated children" << std::endl;
 
@@ -326,7 +326,7 @@ struct NetworkedTangle: public Tangle {
 		setGenesis(genesis);
 
 		// Restore the original list of tips
-		*util::makeMutable(tips.write_lock()) = originalTips;
+		*util::mutable_cast(tips.write_lock()) = originalTips;
 	}
 
 	// Function which allows saving a tangle to a file
@@ -518,7 +518,7 @@ public:
 		static void listener(breep::tcp::netdata_wrapper<UpdateWeightsRequest>& networkData, NetworkedTangle& t){
 			// Update all the weights
 			std::thread([&t](){
-				for(auto [i, tipLock] = std::make_pair(size_t(0), util::makeMutable(t.tips).read_lock()); i < tipLock->size(); i++)
+				for(auto [i, tipLock] = std::make_pair(size_t(0), util::mutable_cast(t.tips).read_lock()); i < tipLock->size(); i++)
 					t.updateCumulativeWeights(tipLock[i]);
 			}).detach();
 
@@ -560,7 +560,7 @@ public:
 
 
 			t.setGenesis(TransactionNode::create(t, networkData.data.genesis));
-			util::makeMutable(t.genesis->hash) = networkData.data.claimedHash;
+			util::mutable_cast(t.genesis->hash) = networkData.data.claimedHash;
 
 			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "` from `" << networkData.source.id() << "`" << std::endl;
 			t.listeningForGenesisSync = false;
@@ -712,13 +712,13 @@ inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle:
 	auto uncompressed = util::decompress(compressed);
 	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
 
-	util::makeMutable(r.claimedHash).clear();
-	d >> util::makeMutable(r.claimedHash);
-	util::makeMutable(r.actualHash).clear();
-	d >> util::makeMutable(r.actualHash);
+	util::mutable_cast(r.claimedHash).clear();
+	d >> util::mutable_cast(r.claimedHash);
+	util::mutable_cast(r.actualHash).clear();
+	d >> util::mutable_cast(r.actualHash);
 	d >> r.validitySignature;
 	d >> r.genesis;
-	util::makeMutable(r.genesis.hash) = r.claimedHash;
+	util::mutable_cast(r.genesis.hash) = r.claimedHash;
 	return _d;
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::SyncGenesisRequest)
