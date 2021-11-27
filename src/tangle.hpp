@@ -323,7 +323,7 @@ struct Tangle {
 
 protected:
 	// Mutex used to synchronize modifications across threads
-	std::mutex mutex;
+	std::recursive_mutex mutex;
 
 	// Flag which determines if a transaction add should recalculate weights or not
 	bool updateWeights = true;

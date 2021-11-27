@@ -128,10 +128,6 @@ struct Transaction {
 		util::makeMutable(parentHashes) = {backing, _new.parentHashes.size()};
 		util::makeMutable(hash) = _new.hash;
 
-		Hash validate = hashTransaction();
-		if(validate != hash)
-			throw InvalidHash(validate, hash);
-
 		return *this;
 	}
 
@@ -145,10 +141,6 @@ struct Transaction {
 		util::makeMutable(parentHashes) = _new.parentHashes;
 		util::makeMutable(_new.parentHashes) = {(Hash*) nullptr, 0}; // The memory is now managed by this object... not the other one
 		util::makeMutable(hash) = _new.hash;
-
-		Hash validate = hashTransaction();
-		if(validate != hash)
-			throw InvalidHash(validate, hash);
 
 		return *this;
 	}

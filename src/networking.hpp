@@ -493,6 +493,8 @@ public:
 		TangleSynchronizeRequest(NetworkedTangle& t) { t.listeningForGenesisSync = true; } // Use this constructor to mark the local tangle as accepting of requests
 
 		static void listener(breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& networkData, NetworkedTangle& t){
+			// Can't add or remove nodes while we are sending the tangle to someone
+			std::scoped_lock lock(t.mutex);
 			recursiveSendTangle(networkData.source, t, t.genesis);
 
 			// Suggest that the recipient update their weights
@@ -503,7 +505,7 @@ public:
 
 	protected:
 		static void recursiveSendTangle(const breep::tcp::peer& requester, NetworkedTangle& t, const TransactionNode::ptr& node){
-			if(node->hash == t.genesis->hash) t.network.send_object_to(requester, SyncGenesisRequest(*node, *t.personalKeys));
+			if(node->isGenesis) t.network.send_object_to(requester, SyncGenesisRequest(*node, *t.personalKeys));
 			else t.network.send_object_to(requester, SynchronizationAddTransactionRequest(*node, *t.personalKeys));
 
 			for(int i = 0; i < node->children.read_lock()->size(); i++)
@@ -526,11 +528,11 @@ public:
 
 	// Message which causes the recipent to update their genesis block (only valid if they are accepting of the change)
 	struct SyncGenesisRequest {
-		Hash validityHash = INVALID_HASH;
+		Hash claimedHash = INVALID_HASH, actualHash = INVALID_HASH;
 		std::string validitySignature;
 		Transaction genesis;
 		SyncGenesisRequest() = default;
-		SyncGenesisRequest(Transaction& _genesis, const key::KeyPair& keys) : validityHash(_genesis.hash), validitySignature(key::signMessage(keys, validityHash)), genesis(_genesis) {}
+		SyncGenesisRequest(Transaction& _genesis, const key::KeyPair& keys) : claimedHash(_genesis.hash), actualHash(_genesis.hashTransaction()), validitySignature(key::signMessage(keys, claimedHash + actualHash)), genesis(_genesis) {}
 
 		static void listener(breep::tcp::netdata_wrapper<SyncGenesisRequest>& networkData, NetworkedTangle& t){
 			// If we didn't request a new genesis... do nothing
@@ -539,12 +541,11 @@ public:
 			// Don't start with a new genesis if its hash matches the current genesis
 			if(t.genesis->hash == networkData.data.genesis.hash)
 				return;
-			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
-			if(networkData.data.genesis.hash != networkData.data.validityHash){
-				std::cerr << "Remote transaction with hash `" << networkData.data.genesis.hash << "` does not match its remote integrity hash `" << networkData.data.validityHash << "` discarding." << std::endl;
-				throw Transaction::InvalidHash(networkData.data.validityHash, networkData.data.genesis.hash); // TODO: Exception caught by Breep, need alternative error handling?
+			// If the remote transaction's hash doesn't match what is actual... it has an invalid hash
+			if(networkData.data.genesis.hashTransaction() != networkData.data.actualHash){
+				std::cerr << "Remote transaction with actual hash `" << networkData.data.genesis.hashTransaction() << "` does not match its remote actual integrity hash `" << networkData.data.actualHash << "` discarding." << std::endl;
+				throw Transaction::InvalidHash(networkData.data.actualHash, networkData.data.genesis.hash); // TODO: Exception caught by Breep, need alternative error handling?
 			}
-
 			// If we don't have the sender's public key, ask for it and then ask them to resend the tangle
 			if(!t.peerKeys.contains(networkData.source.id())){
 				t.network.send_object_to(networkData.source, PublicKeySyncRequest());
@@ -552,7 +553,7 @@ public:
 				return;
 			}
 			// If we can't verify the transaction discard it
-			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], networkData.data.genesis.hash, networkData.data.validitySignature)){
+			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], networkData.data.genesis.hash + networkData.data.genesis.hashTransaction(), networkData.data.validitySignature)){
 				std::cerr << "Syncing of genesis with hash `" + networkData.data.genesis.hash + "` failed, sender's identity failed to be verified, discarding." << std::endl;
 				return;
 			}
@@ -565,6 +566,7 @@ public:
 
 
 			t.setGenesis(TransactionNode::create(t, networkData.data.genesis));
+			util::makeMutable(t.genesis->hash) = networkData.data.claimedHash;
 
 			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "` from `" << networkData.source.id() << "`" << std::endl;
 			t.listeningForGenesisSync = false;
@@ -705,7 +707,8 @@ BREEP_DECLARE_TYPE(NetworkedTangle::UpdateWeightsRequest)
 
 inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangle::SyncGenesisRequest& r) {
 	breep::serializer s;
-	s << r.validityHash;
+	s << r.claimedHash;
+	s << r.actualHash;
 	s << r.validitySignature;
 	s << r.genesis;
 
@@ -714,16 +717,18 @@ inline breep::serializer& operator<<(breep::serializer& _s, const NetworkedTangl
 	return _s;
 }
 inline breep::deserializer& operator>>(breep::deserializer& _d, NetworkedTangle::SyncGenesisRequest& r) {
-	std::basic_string<unsigned char> compressed;
+	std::string compressed;
 	_d >> compressed;
-	auto uncompressed = util::decompress(*(std::string*) &compressed);
+	auto uncompressed = util::decompress(compressed);
 	breep::deserializer d(*(std::basic_string<unsigned char>*) &uncompressed);
 
-	std::string validityHash;
-	d >> validityHash;
-	(*(std::string*) &r.validityHash) = validityHash;
+	util::makeMutable(r.claimedHash).clear();
+	d >> util::makeMutable(r.claimedHash);
+	util::makeMutable(r.actualHash).clear();
+	d >> util::makeMutable(r.actualHash);
 	d >> r.validitySignature;
 	d >> r.genesis;
+	util::makeMutable(r.genesis.hash) = r.claimedHash;
 	return _d;
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::SyncGenesisRequest)
