@@ -192,59 +192,25 @@ int main(int argc, char* argv[]) {
 	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
+	// Explain how to get to help message
+	std::cout << "Press `h` for additional instruction" << std::endl;
+
+
 	breep::listener_id pingingID = 0;
 	std::atomic<size_t> pingingThreads = 0;
 	char cmd;
 	while((cmd = tolower(std::cin.get())) != 'q') {
 		switch(cmd){
+		// Query our balance
+		case 'b':
+			{
+				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << "(0%) " << t.queryBalance(t.personalKeys->pub, .5) << "(50%) " <<  t.queryBalance(t.personalKeys->pub, .95) << "(95%)"<< std::endl;
+			}
+			break;
+
 		// Clear the screen
 		case 'c':
 			system("clear");
-			break;
-
-		// Create transaction
-		case 't':
-			{
-				// Ask who to send too and how much to send
-				std::string accountHash;
-				uint difficulty;
-				double amount;
-				std::cout << "Enter account to transfer to ('r' for random): ";
-				std::cin >> accountHash;
-				std::cout << "Enter amount to transfer: ";
-				std::cin >> amount;
-				std::cout << "Select mining difficulty (1-5): ";
-				std::cin >> difficulty;
-
-				// If they asked for random choose a random account
-				if(accountHash == "r" && !network->peers().empty()){
-					size_t id = rand() % network->peers().size();
-					auto chosen = network->peers().begin();
-					for(int i = 1; i < id; i++) chosen++;
-
-					if(t.peerKeys.contains(chosen->second.id()))
-						accountHash = key::hash(t.peerKeys[chosen->second.id()]);
-				}
-				// If we failed to find a random account to send to... send to ourselves
-				if(accountHash == "r")
-					accountHash = key::hash(t.personalKeys->pub);
-
-				try{
-					// Create transaction inputs and outputs
-					std::vector<Transaction::Input> inputs;
-					inputs.emplace_back(*t.personalKeys, amount);
-					std::vector<Transaction::Output> outputs;
-					outputs.emplace_back(t.findAccount(accountHash), amount);
-
-					// Create, mine, and add the transaction
-					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
-					t.add(TransactionNode::createAndMine(t, inputs, outputs, difficulty));
-				} catch (Tangle::InvalidBalance ib) {
-					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
-				} catch (NetworkedTangle::InvalidAccount ia) {
-					std::cerr << ia.what() << " Discarding transaction!" << std::endl;
-				}
-			}
 			break;
 
 		// Debug output
@@ -267,20 +233,22 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 
-		// Randomly walk to find a tip
-		case 'r':
+		case 'h':
 			{
-				std::cout << t.tips.read_lock()->size() << " tips to find" << std::endl;
-				auto res = t.genesis->biasedRandomWalk();
-				std::cout << "found: " << res->hash << std::endl;
-				std::cout << t.genesis->isChild(res) << std::endl;
-			}
-			break;
-
-		// Query our balance
-		case 'b':
-			{
-				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << "(0%) " << t.queryBalance(t.personalKeys->pub, .5) << "(50%) " <<  t.queryBalance(t.personalKeys->pub, .95) << "(95%)"<< std::endl;
+				std::cout << "Tangle operations:" << std::endl
+					<< "(b)alance - Query our current balance (also displays our address)" << std::endl
+					<< "(c)lear - Clear the screen" << std::endl
+					<< "(d)ebug - Display a debug output of the tangle and (optionally) a transaction in the tangle" << std::endl
+					<< "(h)elp - Show this help message" << std::endl
+					<< "(g)enerate - Generates the Latest Common Genesis and prunes the tangle" << std::endl
+					<< "(k)ey management - Options to manage your keys" << std::endl
+					<< "(p)inging toggle - Toggle weather recieved transactions should be immediately forwarded elsewhere" << std::endl << "\t(simulates a more vibrant network)" << std::endl
+					<< "(s)ave - Save the tangle to a file" << std::endl
+					<< "(l)oad - Loads a tangle from a file" << std::endl
+					<< "(t)ransaction - Create a new transaction" << std::endl
+					<< "(w)eights - Manually start propigating weights through the tangle" << std::endl
+					<< std::endl
+					<< "Select an operation:" << std::endl;
 			}
 			break;
 
@@ -289,52 +257,6 @@ int main(int argc, char* argv[]) {
 			{
 				t.prune();
 				t.genesis->debugDump();
-			}
-			break;
-
-		// Save tangle
-		case 's':
-			{
-				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
-				std::cout << "Enter relative path to save tangle to: ";
-				std::string path;
-				std::getline(std::cin, path);
-
-				std::ofstream fout(path, std::ios::binary);
-				if(!fout){
-					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
-					continue;
-				}
-
-				t.saveTangle(fout);
-				fout.close();
-
-				std::cout << "Tangle saved to " << path << std::endl;
-			}
-			break;
-
-		// Load tangle
-		case 'l':
-			{
-				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
-				std::cout << "Enter relative path to load tangle from: ";
-				std::string path;
-				std::getline(std::cin, path);
-
-				std::ifstream fin(path, std::ios::binary);
-				if(!fin){
-					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
-					continue;
-				}
-
-				fin.seekg(0l, std::ios::end);
-				size_t size = fin.tellg();
-				fin.seekg(0l, std::ios::beg);
-				fin.clear();
-				t.loadTangle(fin, size);
-				fin.close();
-
-				std::cout << "Successfully loaded tangle from " << path << std::endl;
 			}
 			break;
 
@@ -433,6 +355,97 @@ int main(int argc, char* argv[]) {
 
 					if(pingingID)
 						std::cout << "Started pinging transactions" << std::endl;
+				}
+			}
+			break;
+
+		// Save tangle
+		case 's':
+			{
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
+				std::cout << "Enter relative path to save tangle to: ";
+				std::string path;
+				std::getline(std::cin, path);
+
+				std::ofstream fout(path, std::ios::binary);
+				if(!fout){
+					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+					continue;
+				}
+
+				t.saveTangle(fout);
+				fout.close();
+
+				std::cout << "Tangle saved to " << path << std::endl;
+			}
+			break;
+
+		// Load tangle
+		case 'l':
+			{
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
+				std::cout << "Enter relative path to load tangle from: ";
+				std::string path;
+				std::getline(std::cin, path);
+
+				std::ifstream fin(path, std::ios::binary);
+				if(!fin){
+					std::cerr << "Invalid path: `" << path << "`!" << std::endl;
+					continue;
+				}
+
+				fin.seekg(0l, std::ios::end);
+				size_t size = fin.tellg();
+				fin.seekg(0l, std::ios::beg);
+				fin.clear();
+				t.loadTangle(fin, size);
+				fin.close();
+
+				std::cout << "Successfully loaded tangle from " << path << std::endl;
+			}
+			break;
+
+		// Create transaction
+		case 't':
+			{
+				// Ask who to send too and how much to send
+				std::string accountHash;
+				uint difficulty;
+				double amount;
+				std::cout << "Enter account to transfer to ('r' for random): ";
+				std::cin >> accountHash;
+				std::cout << "Enter amount to transfer: ";
+				std::cin >> amount;
+				std::cout << "Select mining difficulty (1-5): ";
+				std::cin >> difficulty;
+
+				// If they asked for random choose a random account
+				if(accountHash == "r" && !network->peers().empty()){
+					size_t id = rand() % network->peers().size();
+					auto chosen = network->peers().begin();
+					for(int i = 1; i < id; i++) chosen++;
+
+					if(t.peerKeys.contains(chosen->second.id()))
+						accountHash = key::hash(t.peerKeys[chosen->second.id()]);
+				}
+				// If we failed to find a random account to send to... send to ourselves
+				if(accountHash == "r")
+					accountHash = key::hash(t.personalKeys->pub);
+
+				try{
+					// Create transaction inputs and outputs
+					std::vector<Transaction::Input> inputs;
+					inputs.emplace_back(*t.personalKeys, amount);
+					std::vector<Transaction::Output> outputs;
+					outputs.emplace_back(t.findAccount(accountHash), amount);
+
+					// Create, mine, and add the transaction
+					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
+					t.add(TransactionNode::createAndMine(t, inputs, outputs, difficulty));
+				} catch (Tangle::InvalidBalance ib) {
+					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
+				} catch (NetworkedTangle::InvalidAccount ia) {
+					std::cerr << ia.what() << " Discarding transaction!" << std::endl;
 				}
 			}
 			break;
