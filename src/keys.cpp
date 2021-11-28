@@ -1,3 +1,13 @@
+/**
+ * @file keys.cpp
+ * @author Joshua Dahl (jdahl@unr.edu)
+ * @brief Code backing the key generation functions
+ * @version 0.1
+ * @date 2021-11-28
+ * 
+ * @copyright Copyright (c) 2021
+ * 
+ */
 #include "keys.hpp"
 
 #include <iostream>
@@ -64,15 +74,15 @@ namespace key {
 	}
 
 	// Function which converts a private key to a byte array
-	std::vector<Byte> save(const PrivateKey& key) {
-		std::vector<Byte> out;
+	std::vector<byte> save(const PrivateKey& key) {
+		std::vector<byte> out;
 		key.Save(CryptoPP::VectorSink(out).Ref());
 		return out;
 	}
 
 	// Function which converts a public key to a byte array
-	std::vector<Byte> save(const PublicKey& key) {
-		std::vector<Byte> out;
+	std::vector<byte> save(const PublicKey& key) {
+		std::vector<byte> out;
 		key.Save(CryptoPP::VectorSink(out).Ref());
 		return out;
 	}
@@ -87,9 +97,9 @@ namespace key {
 	}
 
 	// Function which converts a keypair to a byte array
-	std::vector<Byte> save(const PrivateKey& pri, const PublicKey& pub) {
-		std::vector<Byte> out = save(pri);
-		std::vector<Byte> pubVec = save(pub);
+	std::vector<byte> save(const PrivateKey& pri, const PublicKey& pub) {
+		std::vector<byte> out = save(pri);
+		std::vector<byte> pubVec = save(pub);
 		// Append the data for public key to the private key
 		std::move(pubVec.begin(), pubVec.end(), std::back_inserter(out));
 		return out;
@@ -111,7 +121,7 @@ namespace key {
 
 	// Function which loads a public key from a base 64 string
 	PublicKey loadPublicBase64(const std::string& encoded){
-		std::vector<Byte> decoded;
+		std::vector<byte> decoded;
 		CryptoPP::StringSource ss(encoded, true, new CryptoPP::Base64Decoder(new CryptoPP::VectorSink(decoded)));
 
 		return loadPublic(decoded);

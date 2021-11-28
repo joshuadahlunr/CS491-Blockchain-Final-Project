@@ -1,6 +1,19 @@
+/**
+ * @file networking_handshake.cpp
+ * @author Joshua Dahl (jdahl@unr.edu)
+ * @brief The code backing the handshake half of networking.hpp
+ * @version 0.1
+ * @date 2021-11-28
+ *
+ * @copyright Copyright (c) 2021
+ *
+ */
 #include "networking.hpp"
 
-// Function which finds a free port to listen on
+/**
+ * @brief Function which finds a free port to listen on
+ * @return unsigned short - the discovered free port
+ */
 unsigned short determineLocalPort(){
 	// Function which checks if a port is open
 	auto portInUse = [](unsigned short port) -> bool {
@@ -21,13 +34,23 @@ unsigned short determineLocalPort(){
 	return localPortNumber;
 }
 
-// Structure which stores the result of a handshake, and a short header to validate the shake
+/**
+ * @brief Structure which stores the result of a handshake, and a short header to validate the shake
+ */
 struct Handshake {
-	char H = 'H', A = 'A', N = 'N', D = 'D', S = 'S', K = 'K', E = 'E'; // Header (for validation)
+	// Header (for validation)
+	char H = 'H', A = 'A', N = 'N', D = 'D', S = 'S', K = 'K', E = 'E';
+	// Port discovered by the handshake
 	unsigned short port;
 };
 
-// Function which runs in a thread... looking for handshake pings
+/**
+ * @brief Function which runs in a thread... looking for handshake pings
+ *
+ * @param acceptor - ASIO connection acceptor
+ * @param io_service - ASIO IO service
+ * @param localNetworkPort - The port we are currently connected on
+ */
 void handshake::acceptHandshakeConnection(boost::asio::ip::tcp::acceptor& acceptor, boost::asio::io_service& io_service, unsigned short localNetworkPort) {
 	const int max_length = 1024;
 	char data[max_length];
@@ -50,7 +73,13 @@ void handshake::acceptHandshakeConnection(boost::asio::ip::tcp::acceptor& accept
 	}
 }
 
-// Function which pings ports on a remote address for connectivity
+/**
+ * @brief Function which pings ports on a remote address for connectivity
+ *
+ * @param io_service - ASIO IO service
+ * @param address - IP Address to ping
+ * @return unsigned short - The discovered remote port
+ */
 unsigned short handshake::determineRemotePort(boost::asio::io_service& io_service, boost::asio::ip::address& address){
 	unsigned short handshakePort = DEFAULT_PORT_NUMBER;
 	unsigned short remotePort = -1;
@@ -97,6 +126,3 @@ unsigned short handshake::determineRemotePort(boost::asio::io_service& io_servic
 
 	return remotePort;
 }
-
-// Storage for the ID of the last key receiver
-boost::uuids::uuid NetworkedTangle::PublicKeySyncRequest::lastSent;
