@@ -207,14 +207,14 @@ int main(int argc, char* argv[]) {
 			{
 				// Ask who to send too and how much to send
 				std::string accountHash;
-				uint difficutly;
+				uint difficulty;
 				double amount;
 				std::cout << "Enter account to transfer to ('r' for random): ";
 				std::cin >> accountHash;
 				std::cout << "Enter amount to transfer: ";
 				std::cin >> amount;
 				std::cout << "Select mining difficulty (1-5): ";
-				std::cin >> difficutly;
+				std::cin >> difficulty;
 
 				// If they asked for random choose a random account
 				if(accountHash == "r" && !network->peers().empty()){
@@ -238,7 +238,7 @@ int main(int argc, char* argv[]) {
 
 					// Create, mine, and add the transaction
 					std::cout << "Sending " << amount << " money to " << accountHash << std::endl;
-					t.add(TransactionNode::createAndMine(t, inputs, outputs, difficutly));
+					t.add(TransactionNode::createAndMine(t, inputs, outputs, difficulty));
 				} catch (Tangle::InvalidBalance ib) {
 					std::cerr << ib.what() << " Discarding transaction!" << std::endl;
 				} catch (NetworkedTangle::InvalidAccount ia) {

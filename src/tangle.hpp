@@ -15,7 +15,7 @@
 #include "transaction.hpp"
 
 // The number of tips there can be at most in a given instant of time to qualify to be converted into a genesis
-#define GENESIS_CANIDATE_THRESHOLD 3
+#define GENESIS_CANDIDATE_THRESHOLD 3
 
 struct Tangle;
 
@@ -449,7 +449,7 @@ public:
 			}).detach();
 
 			// Add the current tips as canidate to become a new genesis
-			if(auto tipsLock = tips.read_lock(); tipsLock->size() <= GENESIS_CANIDATE_THRESHOLD)
+			if (auto tipsLock = tips.read_lock(); tipsLock->size() <= GENESIS_CANDIDATE_THRESHOLD)
 				genesisCanidates.push(*tipsLock);
 		} // End Critical Region
 

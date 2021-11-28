@@ -146,12 +146,12 @@ struct NetworkedTangle: public Tangle {
 	}
 
 	TransactionNode::ptr createLatestCommonGenesis(){
-		// If there are no genesis canidates our genesis is the latest common genesis
-		if(genesisCanidates.empty()) return genesis;
+		// If there are no genesis candidates our genesis is the latest common genesis
+		if (genesisCanidates.empty()) return genesis;
 
-		std::cout << "Genesis canidates found" << std::endl;
+		std::cout << "Genesis candidates found" << std::endl;
 
-		// Look through the queue and find the latest canidate set of nodes with 100% confidence
+		// Look through the queue and find the latest candidate set of nodes with 100% confidence
 		std::vector<TransactionNode::const_ptr>* _chosen = nullptr;
 		for(auto& canidate: genesisCanidates.getContainer()){
 			bool valid = true;

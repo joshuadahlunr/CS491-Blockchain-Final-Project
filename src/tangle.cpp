@@ -23,7 +23,7 @@ TransactionNode::ptr TransactionNode::createAndMine(const Tangle& t, const std::
 		avgHeight += parent->height();
 	avgHeight /= parents.size();
 
-	// If we can find a tip whoes height (longest path to genesis) qualifies it as left behind, also add it as a parent
+	// If we can find a tip whose height (longest path to genesis) qualifies it as left behind, also add it as a parent
 	for(auto [i, tipLock] = std::make_pair(size_t(0), util::mutable_cast(t.tips).read_lock()); i < tipLock->size(); i++)
 		if(tipLock[i]->height() <= avgHeight - LEFT_BEHIND_TIP_DELTA){
 			parents.push_back(tipLock[i]);
