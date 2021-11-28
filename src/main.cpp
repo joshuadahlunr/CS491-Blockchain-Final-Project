@@ -86,12 +86,7 @@ int main(int argc, char* argv[]) {
 	NetworkedTangle t(*network);
 
 	// Disabling all logs (set to 'warning' by default).
-	network->set_log_level(breep::log_level::none);
-
-	// If we receive a class for which we don't have any listener (such as an int, for example), this will be called.
-	network->set_unlistened_type_listener([](breep::tcp::network&,const breep::tcp::peer&,breep::deserializer&,bool,uint64_t) -> void {
-		std::cout << "Unidentified message received!" << std::endl;
-	});
+	network->set_log_level(breep::log_level::warning);
 
 
 	// Generate or load a keypair

@@ -542,10 +542,8 @@ public:
 			if(t.genesis->hash == networkData.data.genesis.hash)
 				return;
 			// If the remote transaction's hash doesn't match what is actual... it has an invalid hash
-			if(networkData.data.genesis.hashTransaction() != networkData.data.actualHash){
-				std::cerr << "Remote transaction with actual hash `" << networkData.data.genesis.hashTransaction() << "` does not match its remote actual integrity hash `" << networkData.data.actualHash << "` discarding." << std::endl;
+			if(networkData.data.genesis.hashTransaction() != networkData.data.actualHash)
 				throw Transaction::InvalidHash(networkData.data.actualHash, networkData.data.genesis.hash); // TODO: Exception caught by Breep, need alternative error handling?
-			}
 			// If we don't have the sender's public key, ask for it and then ask them to resend the tangle
 			if(!t.peerKeys.contains(networkData.source.id())){
 				t.network.send_object_to(networkData.source, PublicKeySyncRequest());
@@ -553,16 +551,12 @@ public:
 				return;
 			}
 			// If we can't verify the transaction discard it
-			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], networkData.data.genesis.hash + networkData.data.genesis.hashTransaction(), networkData.data.validitySignature)){
-				std::cerr << "Syncing of genesis with hash `" + networkData.data.genesis.hash + "` failed, sender's identity failed to be verified, discarding." << std::endl;
-				return;
-			}
+			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], networkData.data.genesis.hash + networkData.data.genesis.hashTransaction(), networkData.data.validitySignature))
+				throw std::runtime_error("Syncing of genesis with hash `" + networkData.data.genesis.hash + "` failed, sender's identity failed to be verified, discarding.");
 
 			// Ensure the genesis transaction doesn't have any inputs
-			if(!networkData.data.genesis.inputs.empty()){
-				std::cerr << "Remote genesis with hash `" + networkData.data.genesis.hash + "` failed, genesis transactions can't have inputs!" << std::endl;
-				return;
-			}
+			if(!networkData.data.genesis.inputs.empty())
+				throw std::runtime_error("Remote genesis with hash `" + networkData.data.genesis.hash + "` failed, genesis transactions can't have inputs!");
 
 
 			t.setGenesis(TransactionNode::create(t, networkData.data.genesis));
@@ -585,10 +579,8 @@ public:
 			const Transaction& transaction = networkData.data.transaction;
 
 			// If the remote transaction's hash doesn't match what is claimed... it has an invalid hash
-			if(transaction.hash != networkData.data.validityHash){
-				std::cerr << "Remote transaction with hash `" << transaction.hash << "` does not match its remote integrity hash `" << networkData.data.validityHash << "` discarding." << std::endl;
+			if(transaction.hash != networkData.data.validityHash)
 				throw Transaction::InvalidHash(networkData.data.validityHash, transaction.hash); // TODO: Exception caught by Breep, need alternative error handling?
-			}
 
 			attemptToAddTransaction(transaction, {networkData.source.id(), networkData.data.validitySignature}, t);
 
@@ -623,10 +615,8 @@ public:
 				}
 
 				// If we can't verify the transaction discard it
-				if(!key::verifyMessage(t.peerKeys[validityPair.peerID], transaction.hash, validityPair.signature)){
-					std::cerr << "Transaction with hash `" + transaction.hash + "` sender's identity failed to be verified, discarding." << std::endl;
-					return;
-				}
+				if(!key::verifyMessage(t.peerKeys[validityPair.peerID], transaction.hash, validityPair.signature))
+					throw std::runtime_error("Transaction with hash `" + transaction.hash + "` sender's identity failed to be verified, discarding.");
 
 				bool parentsFound = true;
 				std::vector<TransactionNode::ptr> parents;
