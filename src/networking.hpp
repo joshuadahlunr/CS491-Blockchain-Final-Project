@@ -103,6 +103,12 @@ struct NetworkedTangle: public Tangle {
 		});
 
 		// Listen for synchronization requests
+		network.add_data_listener<GenesisVoteRequest>([this] (breep::tcp::netdata_wrapper<GenesisVoteRequest>& dw) -> void {
+			GenesisVoteRequest::listener(dw, *this);
+		});
+		network.add_data_listener<GenesisVoteResponse>([this] (breep::tcp::netdata_wrapper<GenesisVoteResponse>& dw) -> void {
+			GenesisVoteResponse::listener(dw, *this);
+		});
 		network.add_data_listener<TangleSynchronizeRequest>([this] (breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& dw) -> void {
 			TangleSynchronizeRequest::listener(dw, *this);
 		});
@@ -371,7 +377,7 @@ struct NetworkedTangle: public Tangle {
 		// The genesis is always the first transaction in the file
 		Transaction trx;
 		d >> trx;
-		listeningForGenesisSync = true; // Flag us as prepared to receive a new genesis
+		genesisSyncExpectedHash = trx.hash; // Flag us as prepared to receive a new genesis
 		network.send_object_to_self(SyncGenesisRequest(trx, *personalKeys));
 
 		// Read in each transaction from the deserializer and then add it to the tangle
@@ -385,7 +391,8 @@ struct NetworkedTangle: public Tangle {
 	}
 
 private:
-	bool listeningForGenesisSync = false;
+	std::unique_ptr<std::map<std::vector<std::string>, std::pair<boost::uuids::uuid, size_t>>> genesisVotes = nullptr;
+	std::string genesisSyncExpectedHash = INVALID_HASH;
 
 	// Struct containing both features needed to verify a transaction's hash
 	struct HashVerificationPair {
@@ -486,12 +493,99 @@ public:
 		}
 	};
 
+	// Message which requests a vote for what genesis is being used
+	struct GenesisVoteRequest {
+		GenesisVoteRequest() = default;
+		GenesisVoteRequest(NetworkedTangle& t) { // Use this constructor to mark the local tangle as accepting of requests
+			t.genesisVotes = std::make_unique<std::map<std::vector<std::string>, std::pair<boost::uuids::uuid, size_t>>>();
+		}
+
+		static void listener(breep::tcp::netdata_wrapper<GenesisVoteRequest> &networkData, NetworkedTangle &t) {
+			t.network.send_object_to(networkData.source, GenesisVoteResponse(t));
+			std::cout << "Sent genesis vote to `" << networkData.source.id() << "`" << std::endl;
+		}
+	};
+
+	// Message which sends the hashes our genesis block represent to the reequesting node
+	struct GenesisVoteResponse {
+		std::vector<std::string> genesisHashes;
+		std::string signature;
+
+		GenesisVoteResponse() = default;
+		GenesisVoteResponse(NetworkedTangle& t): genesisHashes(t.genesis->parentHashes.begin(), t.genesis->parentHashes.end()) {
+			genesisHashes.push_back(t.genesis->hash);
+
+			// TODO: do we need to sort the genesis hashes?
+
+			std::string message;
+			for(auto& hash: genesisHashes)
+				message += hash;
+			signature = key::signMessage(*t.personalKeys, message);
+		}
+
+		static void listener(breep::tcp::netdata_wrapper<GenesisVoteResponse> &networkData, NetworkedTangle &t) {
+			// If we aren't accepting votes... ignore the message
+			if(!t.genesisVotes) return;
+			// If we don't have the sender's public key, ask for it and then ask for their vote again
+			if(!t.peerKeys.contains(networkData.source.id())){
+				t.network.send_object_to(networkData.source, PublicKeySyncRequest());
+				t.network.send_object_to(networkData.source, GenesisVoteRequest());
+				return;
+			}
+			// Verify that the vote is from who it says it is
+			std::string message;
+			for(auto& hash: networkData.data.genesisHashes)
+				message += hash;
+			if(!key::verifyMessage(t.peerKeys[networkData.source.id()], message, networkData.data.signature))
+				throw std::runtime_error("Genesis vote failed, sender's identity failed to be verified, discarding.");
+
+			// Increment the hash's count in the recieved map
+			auto& hashes = networkData.data.genesisHashes;
+			auto& genesisVotes = *t.genesisVotes;
+			if(!genesisVotes.contains(hashes))
+				genesisVotes[hashes] = {networkData.source.id(), 1};
+			else genesisVotes[hashes].second++;
+			std::cout << "Recieved genesis vote from `" << networkData.source.id() << "`" << std::endl;
+
+			
+			// Lambda which accepts a vote from a peer
+			auto acceptVote = [&t](const breep::tcp::peer& source, std::string_view expectedHash){
+				// Clear the votes
+				t.genesisVotes.reset(nullptr);
+
+				// Mark that we are expecting the hash at the back of the list (the last hash is the actual hash, as opposed to the parent hashes)
+				t.genesisSyncExpectedHash = expectedHash;
+				// Request a tangle sync from the recieved voter
+				t.network.send_object_to(source, TangleSynchronizeRequest());
+			};
+
+			// If this genesis pair has a majority of the vote
+			if(genesisVotes[hashes].second > t.peerKeys.size() / 2)
+				acceptVote(networkData.source, hashes.back());
+
+			else {
+				// Total how many votes there currently are
+				size_t totalVotes = 0;
+				for(auto& [hashes, idVotes]: genesisVotes)
+					totalVotes += idVotes.second;
+				// If everyone has voted
+				if(totalVotes >= t.peerKeys.size() - 1){ // Minus 1 since we are also listed in peer keys
+					// Find the genesis with the most votes
+					auto best = *std::max_element(genesisVotes.begin(), genesisVotes.end(), [](const auto& a, const auto& b) {
+						return a.second.second < b.second.second;
+					});
+
+					// Request a tangle sync from the first voter for the best genesis
+					if(t.network.peers().contains(best.second.first))
+						acceptVote(t.network.peers().at(best.second.first), best.first.back());
+				}
+			}
+		}
+	};
+
+
 	// Message which causes every node to send their tangle to the sender
 	struct TangleSynchronizeRequest {
-		// When we create a sync request mark that we are now listening for genesis syncs
-		TangleSynchronizeRequest() = default;
-		TangleSynchronizeRequest(NetworkedTangle& t) { t.listeningForGenesisSync = true; } // Use this constructor to mark the local tangle as accepting of requests
-
 		static void listener(breep::tcp::netdata_wrapper<TangleSynchronizeRequest>& networkData, NetworkedTangle& t){
 			// Can't add or remove nodes while we are sending the tangle to someone
 			std::scoped_lock lock(t.mutex);
@@ -536,11 +630,14 @@ public:
 
 		static void listener(breep::tcp::netdata_wrapper<SyncGenesisRequest>& networkData, NetworkedTangle& t){
 			// If we didn't request a new genesis... do nothing
-			if(!t.listeningForGenesisSync)
+			if(t.genesisSyncExpectedHash == INVALID_HASH)
 				return;
 			// Don't start with a new genesis if its hash matches the current genesis
 			if(t.genesis->hash == networkData.data.genesis.hash)
 				return;
+			// If the genesis isn't the one we are looking for, it is invalid
+			if(t.genesisSyncExpectedHash != networkData.data.genesis.hash)
+				throw std::runtime_error("Recieved genesis sync with invalid hash, discarding");
 			// If the remote transaction's hash doesn't match what is actual... it has an invalid hash
 			if(networkData.data.genesis.hashTransaction() != networkData.data.actualHash)
 				throw Transaction::InvalidHash(networkData.data.actualHash, networkData.data.genesis.hash); // TODO: Exception caught by Breep, need alternative error handling?
@@ -563,7 +660,7 @@ public:
 			util::mutable_cast(t.genesis->hash) = networkData.data.claimedHash;
 
 			std::cout << "Synchronized new genesis with hash `" + t.genesis->hash + "` from `" << networkData.source.id() << "`" << std::endl;
-			t.listeningForGenesisSync = false;
+			t.genesisSyncExpectedHash = INVALID_HASH;
 		}
 	};
 
@@ -669,6 +766,7 @@ public:
 
 // -- Message De/Serialization --
 
+
 inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::PublicKeySyncResponse& r) {
 	s << r.signature;
 	s << r._key;
@@ -682,15 +780,36 @@ inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::
 }
 BREEP_DECLARE_TYPE(NetworkedTangle::PublicKeySyncResponse)
 
+// Empty serialization (no data to send)
 inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::PublicKeySyncRequest& r) { return s; }
 inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::PublicKeySyncRequest& r) { return d; }
 BREEP_DECLARE_TYPE(NetworkedTangle::PublicKeySyncRequest)
+
+// Empty serialization (no data to send)
+inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::GenesisVoteRequest& r) { return s; }
+inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::GenesisVoteRequest& r) { return d; }
+BREEP_DECLARE_TYPE(NetworkedTangle::GenesisVoteRequest)
+
+inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::GenesisVoteResponse& r) {
+	s << r.genesisHashes;
+	s << r.signature;
+
+	return s;
+}
+inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::GenesisVoteResponse& r) {
+	d >> r.genesisHashes;
+	d >> r.signature;
+
+	return d;
+}
+BREEP_DECLARE_TYPE(NetworkedTangle::GenesisVoteResponse)
 
 // Empty serialization (no data to send)
 inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::TangleSynchronizeRequest& r) { return s; }
 inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::TangleSynchronizeRequest& r) { return d; }
 BREEP_DECLARE_TYPE(NetworkedTangle::TangleSynchronizeRequest)
 
+// Empty serialization (no data to send)
 inline breep::serializer& operator<<(breep::serializer& s, const NetworkedTangle::UpdateWeightsRequest& r) { return s; }
 inline breep::deserializer& operator>>(breep::deserializer& d, NetworkedTangle::UpdateWeightsRequest& r) { return d; }
 BREEP_DECLARE_TYPE(NetworkedTangle::UpdateWeightsRequest)
