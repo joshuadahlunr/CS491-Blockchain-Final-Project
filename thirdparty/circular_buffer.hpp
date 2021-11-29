@@ -2,29 +2,15 @@
 #define CIRCULAR_BUFFER_HPP
 
 #include <array>
-#include <exception>
 #include <type_traits>
-#include <memory>
 
 // Adaptor which extends an array-like class to act as a circular buffer
 // NOTE: In order for ranged iteration to work, there must be an unused cell between
 // 	the start and end, thus if the backing array can store N elements, the circular buffer can only store N - 1
 template<typename T, typename Container = std::array<T, 10>, typename Allocator = std::allocator<typename Container::value_type>>
 class circular_buffer_base : public Container {
-	 static_assert(std::is_same<T, typename Container::value_type>::value, "value_type must be the same as the underlying container");
-
-	// Template metaprogramming checking if a type has a function called capacity
-	template<typename, typename _T>
-	struct has_capacity { static_assert(std::integral_constant<_T, false>::value, "Second template parameter needs to be of function type."); };
-	template<typename C, typename Ret, typename... Args>
-	struct has_capacity<C, Ret(Args...)> {
-	private:
-	    template<typename _T> static constexpr auto check(_T*) -> typename std::is_same<decltype( std::declval<_T>().capacity( std::declval<Args>()... ) ), Ret>::type;
-	    template<typename> static constexpr std::false_type check(...);
-	    typedef decltype(check<C>(0)) type;
-	public:
-	    static constexpr bool value = type::value;
-	};
+	// Static assertation that our type and the container's type match
+	static_assert(std::is_same<T, typename Container::value_type>::value, "value_type must be the same as the underlying container");
 
 	// Template metaprogramming checking if a type has a function called get callocator
 	template<typename, typename _T>
@@ -32,11 +18,11 @@ class circular_buffer_base : public Container {
 	template<typename C, typename Ret, typename... Args>
 	struct has_get_allocator<C, Ret(Args...)> {
 	private:
-	    template<typename _T> static constexpr auto check(_T*) -> typename std::is_same<decltype( std::declval<_T>().get_allocator( std::declval<Args>()... ) ), Ret>::type;
-	    template<typename> static constexpr std::false_type check(...);
-	    typedef decltype(check<C>(0)) type;
+		template<typename _T> static constexpr auto check(_T*) -> typename std::is_same<decltype( std::declval<_T>().get_allocator( std::declval<Args>()... ) ), Ret>::type;
+		template<typename> static constexpr std::false_type check(...);
+		typedef decltype(check<C>(0)) type;
 	public:
-	    static constexpr bool value = type::value;
+		static constexpr bool value = type::value;
 	};
 
 
@@ -60,20 +46,22 @@ public:
 		circular_buffer_base& creator;
 		// Index (in array space) the iterator is currently pointing to
 		size_type i;
+		// Variable tracking if this iterator is representing the start of the list
+		bool isBegin;
 
 	public:
-		explicit circular_iterator(circular_buffer_base& creator, const size_type i): creator(creator), i(i) {}
+		explicit circular_iterator(circular_buffer_base& creator, const size_type i, bool isBegin = false): creator(creator), i(i), isBegin(isBegin) {}
 		// Increment support
-		circular_iterator& operator++() { creator.increment(i); return *this; }
-        circular_iterator operator++(int) { circular_iterator retval = *this; ++(*this); return retval; }
+		circular_iterator& operator++() { creator.increment(i); isBegin = false; return *this; }
+		circular_iterator operator++(int) { circular_iterator retval = *this; ++(*this); return retval; }
 		// Decrement support
-		circular_iterator& operator--() { creator.decrement(i); return *this; }
-        circular_iterator operator--(int) { circular_iterator retval = *this; --(*this); return retval; }
+		circular_iterator& operator--() { creator.decrement(i); isBegin = false; return *this; }
+		circular_iterator operator--(int) { circular_iterator retval = *this; --(*this); return retval; }
 		// In/equality support
-        bool operator==(circular_iterator& other) const { return i == other.i && creator == other.creator; }
-        bool operator!=(circular_iterator& other) const { return !(*this == other); }
+		bool operator==(circular_iterator& other) const { return i == other.i && creator == other.creator && isBegin == other.isBegin; }
+		bool operator!=(circular_iterator& other) const { return !(*this == other); }
 		// Dereference support
-        reference operator*() const { return creator.container_type::operator[](i); }
+		reference operator*() const { return creator.container_type::operator[](i); }
 	};
 
 public:
@@ -89,7 +77,7 @@ protected:
 	// The index of the array which maps to index [0] in the buffer
  	size_type start = 0;
 	// The index of the array which maps to the end of the buffer
-	size_type _end() { return (start + _size) % _capacity(); }
+	size_type _end() { return (start + _size) % capacity(); }
 
 public:
 	circular_buffer_base() = default;
@@ -127,16 +115,17 @@ public:
 	}
 
 
-	// The number of elements the buffer is capable of holding
-	size_type capacity() const { return _capacity() - 1; }
+	// Function which determines how large the array can be
+	size_t capacity() const { return Container::size(); }
+
 	// The number of elements currently in the buffer
 	size_type size() const { return _size; }
 	// True if the buffer is empty, false otherwise
 	bool empty() const { return size() == 0; }
 
 	// Forward seeking iterators
-	iterator begin() { return iterator(*this, start); }
-	const_iterator cbegin() const { return const_iterator(*this, start); }
+	iterator begin() { return iterator(*this, start, true); }
+	const_iterator cbegin() const { return const_iterator(*this, start, true); }
 	iterator end() { return iterator(*this, _end()); }
 	const_iterator cend() const { return const_iterator(*this, _end()); }
 
@@ -159,7 +148,7 @@ public:
 	// Constructs a new element at the start of the buffer, returns an iterator to it
 	template<typename... Args>
 	iterator emplace_front(Args&&... args){
-		if(size() < _capacity() - 1){
+		if(size() < capacity()){
 			decrement(start);
 			_size++;
 		} else decrement(start);
@@ -170,7 +159,7 @@ public:
 
 	// Function which adds an element to the start of the buffer
 	void push_front(const_reference r){
-		if(size() < _capacity() - 1){
+		if(size() < capacity()){
 			decrement(start);
 			_size++;
 		} else decrement(start);
@@ -192,7 +181,7 @@ public:
 	iterator emplace_back(Args&&... args){
 		construct(&Container::operator[](_end()), std::forward<Args>(args)...);
 
-		if(size() < _capacity() - 1) _size++;
+		if(size() < capacity()) _size++;
 		else increment(start);
 
 		return iterator(*this, _end() - 1);
@@ -202,7 +191,7 @@ public:
 	void push_back(const_reference r){
 		Container::operator[](_end()) = r;
 
-		if(size() < _capacity() - 1) _size++;
+		if(size() < capacity()) _size++;
 		else increment(start);
 	}
 	void push_back(const value_type&& r){ push_back(r); }
@@ -214,8 +203,8 @@ public:
 	}
 
 	// Array access, the start of the array is considered to be start and it goes until the end
-	reference operator[](size_type index){ return Container::operator[]((start + index) % _capacity()); }
-	const_reference operator[](size_type index) const { return Container::operator[]((start + index) % _capacity()); }
+	reference operator[](size_type index){ return Container::operator[]((start + index) % capacity()); }
+	const_reference operator[](size_type index) const { return Container::operator[]((start + index) % capacity()); }
 
 	// Bounds checked array access, the start of the array is considered to be start and it goes until the end
 	reference at(size_type index){
@@ -251,11 +240,11 @@ protected:
 	}
 
 	// Function which increments a value in circle space
-	inline void increment(size_t& n){ n = (n + 1) % _capacity(); }
+	inline void increment(size_t& n){ n = (n + 1) % capacity(); }
 	// Function which decrements a value in circle space
 	inline void decrement(size_t& n){
-		if(n == 0) n = _capacity() - 1;
-		else n = (n - 1) % _capacity();
+		if(n == 0) n = capacity() - 1;
+		else n = (n - 1) % capacity();
 	}
 };
 
@@ -328,35 +317,6 @@ public:
 		Base::_size = 0;
 	}
 
-	// Constructs a new element at the start of the buffer, returns an iterator to it
-	template<typename... Args>
-	iterator emplace_front(Args&&... args){
-		if(Base::size() < Base::_capacity() - 1){
-			Base::decrement(Base::start);
-			Base::_size++;
-		} else {
-			Base::decrement(Base::start);
-			Container::operator[](Base::start - 1) = resetValue; // Reset the value in the empty slot
-		}
-
-		Base::get_allocator().construct(&Container::operator[](Base::start), std::forward<Args>(args)...);
-		return Base::begin();
-	}
-
-	// Function which adds an element to the start of the buffer
-	void push_front(const_reference r){
-		if(Base::size() < Base::_capacity() - 1){
-			Base::decrement(Base::start);
-			Base::_size++;
-		} else {
-			Base::decrement(Base::start);
-			Container::operator[](Base::start - 1) = resetValue; // Reset the value in the empty slot
-		}
-
-		Container::operator[](Base::start) = r;
-	}
-	void push_front(const value_type&& r){ push_front(r); }
-
 	// Function which removes an element from the front of the buffer
 	void pop_front() {
 		if(Base::size() > 0){
@@ -366,38 +326,12 @@ public:
 		}
 	}
 
-	// Function which constructs a new element at the end of the buffer, returns an iterator to it
-	template<typename... Args>
-	iterator emplace_back(Args&&... args){
-		Base::get_allocator().construct(&Container::operator[](Base::_end()), std::forward<Args>(args)...);
-
-		if(Base::size() < Base::_capacity() - 1) Base::_size++;
-		else {
-			Container::operator[](Base::start) = resetValue; // Reset the value in the empty slot
-			Base::increment(Base::start);
-		}
-
-		return iterator(*this, Base::_end() - 1);
-	}
-
-	// Function which adds an element to the end of the buffer
-	void push_back(const_reference r){
-		Container::operator[](Base::_end()) = r;
-
-		if(Base::size() < Base::_capacity() - 1) Base::_size++;
-		else {
-			Container::operator[](Base::start) = resetValue; // Reset the value in the empty slot
-			Base::increment(Base::start);
-		}
-	}
-	void push_back(const value_type&& r){ push_back(r); }
-
 	// Function which removes an element from the end of the buffer
 	void pop_back() {
-		if(Base::size() > 0)
+		if(Base::size() > 0){
 			Base::_size--;
-
-		Container::operator[](Base::_end()) = resetValue; // Reset the value in the empty slot
+			Container::operator[](Base::_end()) = resetValue; // Reset the value in the empty slot
+		}
 	}
 };
 
