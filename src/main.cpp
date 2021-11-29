@@ -229,7 +229,7 @@ int main(int argc, char* argv[]) {
 		// Query our balance
 		case 'b':
 			{
-				std::cout << "Our (" << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << "(0%) " << t.queryBalance(t.personalKeys->pub, .5) << "(50%) " <<  t.queryBalance(t.personalKeys->pub, .95) << "(95%)"<< std::endl;
+				std::cout << "Our (Account = " << key::hash(*t.personalKeys) << ") balance is: " << t.queryBalance(t.personalKeys->pub) << "(0%) " << t.queryBalance(t.personalKeys->pub, .5) << "(50%) " <<  t.queryBalance(t.personalKeys->pub, .95) << "(95%)"<< std::endl;
 			}
 			break;
 
@@ -269,8 +269,8 @@ int main(int argc, char* argv[]) {
 					<< "(g)enerate - Generates the Latest Common Genesis and prunes the tangle" << std::endl
 					<< "(k)ey management - Options to manage your keys" << std::endl
 					<< "(p)inging toggle - Toggle weather recieved transactions should be immediately forwarded elsewhere" << std::endl << "\t(simulates a more vibrant network)" << std::endl
-					<< "(s)ave - Save the tangle to a file" << std::endl
-					<< "(l)oad - Loads a tangle from a file" << std::endl
+					<< "(s)ave <file> - Save the tangle to a file" << std::endl
+					<< "(l)oad <file> - Loads a tangle from a file" << std::endl
 					<< "(t)ransaction - Create a new transaction" << std::endl
 					<< "(w)eights - Manually start propigating weights through the tangle" << std::endl
 					<< "(q)uit - Quits the program" << std::endl
