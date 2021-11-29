@@ -105,9 +105,21 @@ int main(int argc, char* argv[]) {
 	// Create an IO service used by the handshake algorithm
 	boost::asio::io_service io_service;
 
-	// Find an open port for us to listen on and create a network listening on it
-	unsigned short localPort = determineLocalPort();
-	network = std::make_unique<breep::tcp::network>(localPort);
+
+	// Find an open port for the handshake listener, and create a thread accepting handshakes
+	auto handshakePort = determineLocalPort();
+	boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), handshakePort));
+	// Find another open thread for the networkd
+	unsigned short networkPort = determineLocalPort();
+	handshakeThread = std::thread([&acceptor, &io_service, networkPort](){
+		while(handshakeThreadShouldRun)
+			handshake::acceptHandshakeConnection(acceptor, io_service, networkPort);
+	});
+	std::cout << "Started handshake listener on port " << handshakePort << std::endl;
+
+
+	// reate a network listening on the network port we found
+	network = std::make_unique<breep::tcp::network>(networkPort);
 	// Create a network synched tangle
 	NetworkedTangle t(*network);
 
@@ -176,7 +188,7 @@ int main(int argc, char* argv[]) {
 			} catch (...){}
 		}).detach();
 
-		std::cout << "Established a network on port " << localPort << std::endl;
+		std::cout << "Established a network on port " << networkPort << std::endl;
 
 	// Otherwise connect to the network...
 	} else {
@@ -190,7 +202,7 @@ int main(int argc, char* argv[]) {
 			return 2;
 		}
 
-		std::thread([&t, localPort](){
+		std::thread([&t, networkPort](){
 			// Wait half a second
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			// Send our public key to the rest of the network
@@ -198,22 +210,12 @@ int main(int argc, char* argv[]) {
 
 			// Wait half a second
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-			std::cout << "Connected to the network (listening on port " << localPort << ")" << std::endl;
+			std::cout << "Connected to the network (listening on port " << networkPort << ")" << std::endl;
 
 			// If we are a client... ask the network to vote on our new genesis
 			network->send_object(NetworkedTangle::GenesisVoteRequest(t));
 		}).detach();
 	}
-
-
-	// Find an open port for the handshake listener, and create a thread accepting handshakes
-	auto lp = determineLocalPort();
-	boost::asio::ip::tcp::acceptor acceptor(io_service, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), lp));
-	handshakeThread = std::thread([&acceptor, &io_service, localPort](){
-		while(handshakeThreadShouldRun)
-			handshake::acceptHandshakeConnection(acceptor, io_service, localPort);
-	});
-	std::cout << "Started handshake listener on port " << lp << std::endl;
 
 
 	// Explain how to get to help message
