@@ -291,6 +291,7 @@ int main(int argc, char* argv[]) {
 		case 'k':
 			{
 				// Determine which operation we should perform
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
 				std::cout << "(l)oad keys, (s)ave keys, (g)enerate keys: ";
 				std::string _cmd = "";
 				std::getline(std::cin, _cmd);
@@ -298,9 +299,9 @@ int main(int argc, char* argv[]) {
 				char cmd = tolower(_cmd[0]);
 
 				// If we are saving or loading... determine the path to do it to
-				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
 				std::string path = "";
 				if(cmd == 's' || cmd == 'l'){
+					// std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Ignore everything up until a new line
 					std::cout << "Relative path: ";
 					std::getline(std::cin, path);
 				}
@@ -312,6 +313,7 @@ int main(int argc, char* argv[]) {
 
 					// Update our key and send it to the rest of the network
 					t.setKeyPair(keyPair);
+					std::cout << "Generated new KeyPair" << std::endl;
 
 				// Save current keypair to a file
 				} else if(cmd == 's'){
@@ -322,6 +324,7 @@ int main(int argc, char* argv[]) {
 					}
 
 					saveKeyFile(*t.personalKeys, fout);
+					std::cout << "Saved KeyPair to `" << path << "`" << std::endl;
 					fout.close();
 				
 				// Load new keypair from a file
@@ -334,6 +337,7 @@ int main(int argc, char* argv[]) {
 
 					// Update our key and send it to the rest of the network
 					t.setKeyPair( std::make_shared<key::KeyPair>(loadKeyFile(fin)) );
+					std::cout << "Loaded KeyPair from `" << path << "`" << std::endl;
 					fin.close();
 				}
 			}
